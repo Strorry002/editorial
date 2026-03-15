@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Immigrants Data — Admin Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/dashboard/style.css">
+</head>
+
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-icon">🌍</span>
+                <span class="brand-text">ImmigrantsDB</span>
+            </div>
+            <ul class="nav-list">
+                <li class="nav-item active" data-page="overview">
+                    <span class="nav-icon">📊</span>
+                    <span>Overview</span>
+                </li>
+                <li class="nav-item" data-page="sources">
+                    <span class="nav-icon">📡</span>
+                    <span>Data Sources</span>
+                </li>
+                <li class="nav-item" data-page="logs">
+                    <span class="nav-icon">📋</span>
+                    <span>Collection Logs</span>
+                </li>
+                <li class="nav-item" data-page="updates">
+                    <span class="nav-icon">⚖️</span>
+                    <span>Legal Updates</span>
+                </li>
+                <li class="nav-item" data-page="countries">
+                    <span class="nav-icon">🗺️</span>
+                    <span>Countries</span>
+                </li>
+                <li class="nav-item" data-page="publications">
+                    <span class="nav-icon">📰</span>
+                    <span>Publications</span>
+                </li>
+                <li class="nav-item" data-page="articles">
+                    <span class="nav-icon">📝</span>
+                    <span>Articles</span>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <button id="btn-collect" class="btn btn-primary btn-sm">
+                    🔄 Run Collection
+                </button>
+                <div class="version">v1.0.0</div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main">
+            <header class="topbar">
+                <h1 id="page-title">Overview</h1>
+                <div class="topbar-actions">
+                    <span id="last-sync" class="badge badge-dim">Last sync: —</span>
+                    <span id="api-status" class="badge badge-success">API Online</span>
+                </div>
+            </header>
+
+            <div id="page-content" class="content">
+                <!-- Loaded dynamically -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="modal-overlay">
+        <div class="modal-panel">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <div id="modal-icon" class="modal-header-icon"></div>
+                    <div>
+                        <div id="modal-title" class="modal-header-title"></div>
+                        <div id="modal-sub" class="modal-header-sub"></div>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="modal-summary" class="modal-summary"></div>
+                <div id="modal-details-section"></div>
+                <div id="modal-meta" class="modal-meta"></div>
+            </div>
+            <div id="modal-footer" class="modal-footer"></div>
+        </div>
+    </div>
+
+    <script src="/dashboard/app.js"></script>
+</body>
+
+</html>

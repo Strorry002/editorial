@@ -1,0 +1,343 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// COUNTRY — Core entity
+// ============================================================================
+
+model Country {
+  id          String   @id @default(uuid())
+  code        String   @unique          // ISO 3166-1 alpha-2 (US, CA, UK, AU, DE)
+  name        String
+  region      String                    // north-america, europe, oceania, etc.
+  languages   String[]                  // ["en", "fr"]
+  currency    String                    // USD, CAD, GBP, etc.
+  capitalCity String?
+  flag        String?                   // 🇺🇸
+  timezone    String?                   // America/New_York
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  visaPrograms     VisaProgram[]
+  laborRegulations LaborRegulation[]
+  costOfLiving     CostOfLiving[]
+  statistics       Statistic[]
+  legalUpdates     LegalUpdate[]
+
+  @@index([region])
+}
+
+// ============================================================================
+// VISA PROGRAMS — Work, student, tourist, DN, investment, family, asylum
+// ============================================================================
+
+model VisaProgram {
+  id              String    @id @default(uuid())
+  countryCode     String
+  type            String    // work, student, tourist, investment, digital_nomad, family, asylum, refugee
+  name            String    // "H-1B Specialty Occupation", "Express Entry", etc.
+  description     String?
+  requirements    Json      @default("{}") // { documents: [], conditions: [], income_threshold: 0, fees: {} }
+  processingTime  String?   // "3-6 months"
+  duration        String?   // "3 years"
+  renewability    String?   // "renewable once", "unlimited"
+  quotaInfo       String?   // "85,000/year"
+  approvalRate    Float?    // 0.72 = 72%
+  officialUrl     String?
+  lastVerified    DateTime?
+  isActive        Boolean   @default(true)
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  country Country @relation(fields: [countryCode], references: [code])
+
+  @@index([countryCode])
+  @@index([type])
+  @@index([countryCode, type])
+}
+
+// ============================================================================
+// LABOR REGULATIONS — Wages, permits, taxes, diploma recognition, rights
+// ============================================================================
+
+model LaborRegulation {
+  id              String    @id @default(uuid())
+  countryCode     String
+  category        String    // minimum_wage, work_permits, income_tax, diploma_recognition, worker_rights, social_security
+  title           String
+  content         Json      @default("{}") // structured data per category
+  effectiveDate   DateTime?
+  sourceUrl       String?
+  lastVerified    DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  country Country @relation(fields: [countryCode], references: [code])
+
+  @@index([countryCode])
+  @@index([category])
+  @@index([countryCode, category])
+}
+
+// ============================================================================
+// COST OF LIVING — Rent, food, transport, internet, healthcare
+// ============================================================================
+
+model CostOfLiving {
+  id              String    @id @default(uuid())
+  countryCode     String
+  city            String?   // null = country average
+  period          String    // "2025-Q1", "2025-03"
+  rentIndex       Float?    // relative index (NYC = 100)
+  groceriesIndex  Float?
+  transportIndex  Float?
+  healthcareIndex Float?
+  overallIndex    Float?
+  averageRent1br  Float?    // USD/month
+  averageRent3br  Float?
+  mealCost        Float?    // avg restaurant meal
+  internetCost    Float?    // monthly broadband
+  currency        String    @default("USD")
+  sourceUrl       String?
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  country Country @relation(fields: [countryCode], references: [code])
+
+  @@index([countryCode])
+  @@index([countryCode, city])
+  @@unique([countryCode, city, period])
+}
+
+// ============================================================================
+// STATISTICS — Migration flows, approval rates, processing times, diaspora
+// ============================================================================
+
+model Statistic {
+  id              String    @id @default(uuid())
+  countryCode     String
+  category        String    // migration_flow, approval_rate, processing_time, diaspora, population
+  metric          String    // "total_immigrants_2024", "h1b_approval_rate", etc.
+  value           Float
+  unit            String?   // "people", "percent", "months", "days"
+  period          String    // "2025", "2025-Q1"
+  comparison      Float?    // previous period value (for trend)
+  sourceUrl       String?
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  country Country @relation(fields: [countryCode], references: [code])
+
+  @@index([countryCode])
+  @@index([category])
+  @@index([countryCode, category, period])
+}
+
+// ============================================================================
+// LEGAL UPDATES — Changelog of law changes (feeds into Telegram + site)
+// ============================================================================
+
+model LegalUpdate {
+  id               String    @id @default(uuid())
+  countryCode      String
+  category         String    // visa, labor, tax, housing, healthcare, education, asylum
+  title            String
+  summary          String
+  details          String?   // longer markdown content
+  impactLevel      String    @default("medium") // low, medium, high, critical
+  effectiveDate    DateTime?
+  sourceUrl        String?
+
+  // Publication workflow
+  workflowStatus   String    @default("raw")   // raw, draft, review, approved, published, archived
+  assignedTo       String?                      // who's working on this
+  reviewNote       String?                      // reviewer comment
+  publishedContent String?                      // final edited text for publishing
+  telegramPosted   Boolean   @default(false)    // legacy flag
+
+  publishedAt      DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+
+  country          Country   @relation(fields: [countryCode], references: [code])
+  relationsFrom    UpdateRelation[] @relation("FromUpdate")
+  relationsTo      UpdateRelation[] @relation("ToUpdate")
+  distributions    Distribution[]
+  articleSources   ArticleSource[]
+
+  @@index([countryCode])
+  @@index([category])
+  @@index([publishedAt])
+  @@index([telegramPosted])
+  @@index([workflowStatus])
+}
+
+// ============================================================================
+// UPDATE RELATIONS — Graph of related/causal news connections
+// ============================================================================
+
+model UpdateRelation {
+  id           String   @id @default(uuid())
+  fromId       String
+  toId         String
+  relationType String   // related, causes, caused_by, supersedes, part_of_series
+  confidence   Float    @default(1.0) // 0.0-1.0 for auto-detected relations
+  note         String?
+  createdAt    DateTime @default(now())
+
+  fromUpdate   LegalUpdate @relation("FromUpdate", fields: [fromId], references: [id])
+  toUpdate     LegalUpdate @relation("ToUpdate", fields: [toId], references: [id])
+
+  @@unique([fromId, toId])
+  @@index([fromId])
+  @@index([toId])
+}
+
+// ============================================================================
+// DISTRIBUTION — Social media / channel posting tracker
+// ============================================================================
+
+model Distribution {
+  id           String    @id @default(uuid())
+  updateId     String
+  channel      String    // telegram, twitter, instagram, linkedin, website
+  status       String    @default("pending") // pending, sent, failed, deleted
+  externalId   String?   // post ID in the social network
+  externalUrl  String?   // link to the post
+  sentAt       DateTime?
+  errorMessage String?
+  clicks       Int       @default(0)
+  impressions  Int       @default(0)
+  metadata     Json      @default("{}")
+  createdAt    DateTime  @default(now())
+
+  update       LegalUpdate @relation(fields: [updateId], references: [id])
+
+  @@index([updateId])
+  @@index([channel])
+  @@index([status])
+  @@unique([updateId, channel])
+}
+
+// ============================================================================
+// ARTICLES — Editorial content built from LegalUpdates
+// ============================================================================
+
+model Article {
+  id              String    @id @default(uuid())
+  slug            String    @unique
+  title           String
+  excerpt         String?
+  body            String    @default("")
+  bodyHtml        String?
+  coverImage      String?
+
+  tags            String[]
+  region          String?
+  language        String    @default("ru")
+
+  status          String    @default("idea") // idea, outline, draft, review, approved, published, archived
+  author          String?
+  reviewer        String?
+  reviewNote      String?
+
+  metaTitle       String?
+  metaDescription String?
+
+  publishedAt     DateTime?
+  scheduledAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  sources         ArticleSource[]
+  distributions   ArticleDistribution[]
+
+  @@index([status])
+  @@index([publishedAt])
+  @@index([language])
+}
+
+model ArticleSource {
+  id         String   @id @default(uuid())
+  articleId  String
+  updateId   String
+  role       String   @default("source") // source, main_topic, background, quote
+  note       String?
+
+  article    Article      @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  update     LegalUpdate  @relation(fields: [updateId], references: [id])
+
+  @@unique([articleId, updateId])
+  @@index([articleId])
+  @@index([updateId])
+}
+
+model ArticleDistribution {
+  id           String    @id @default(uuid())
+  articleId    String
+  channel      String
+  status       String    @default("pending")
+  format       String    @default("full") // full, excerpt, link_only, thread
+  externalId   String?
+  externalUrl  String?
+  sentAt       DateTime?
+  errorMessage String?
+  clicks       Int       @default(0)
+  metadata     Json      @default("{}")
+  createdAt    DateTime  @default(now())
+
+  article      Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@unique([articleId, channel])
+}
+
+// ============================================================================
+// DATA SOURCES — Registry of external data providers
+// ============================================================================
+
+model DataSource {
+  id              String    @id @default(uuid())
+  name            String    @unique  // "oecd", "eurostat", "numbeo", etc.
+  type            String    // api, scraper, manual
+  baseUrl         String
+  description     String?
+  frequency       String    // daily, weekly, monthly, quarterly, yearly
+  countries       String[]  // ["US", "CA", "UK"] or ["*"] for all
+  dataCategories  String[]  // ["cost_of_living", "statistics"]
+  isActive        Boolean   @default(true)
+  lastFetchedAt   DateTime?
+  lastStatus      String?   // success, error, partial
+  config          Json      @default("{}") // API keys, params, headers
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// ============================================================================
+// COLLECTION LOGS — Audit trail for data fetches
+// ============================================================================
+
+model CollectionLog {
+  id              String    @id @default(uuid())
+  sourceName      String
+  status          String    // success, error, partial
+  recordsAdded    Int       @default(0)
+  recordsUpdated  Int       @default(0)
+  recordsSkipped  Int       @default(0)
+  errorMessage    String?
+  durationMs      Int?
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now())
+
+  @@index([sourceName])
+  @@index([createdAt])
+}

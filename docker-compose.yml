@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: editorial-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: immigrants_data
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-editorial_2026}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5452}:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    container_name: editorial-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-editorial_2026}@db:5432/immigrants_data
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHANNEL_ID: ${TELEGRAM_CHANNEL_ID:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CONGRESS_API_KEY: ${CONGRESS_API_KEY:-}
+      NEWSDATA_API_KEY: ${NEWSDATA_API_KEY:-}
+      AUTOPILOT_ENABLED: ${AUTOPILOT_ENABLED:-true}
+      AUTOPILOT_CRON: ${AUTOPILOT_CRON:-0 11 * * *}
+      AUTOPILOT_AUTO_DRAFT: ${AUTOPILOT_AUTO_DRAFT:-true}
+      PORT: "4100"
+      HOST: "0.0.0.0"
+    ports:
+      - "${APP_PORT:-4100}:4100"
+    volumes:
+      - covers:/app/public/covers
+
+volumes:
+  pgdata:
+  covers:

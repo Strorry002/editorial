@@ -1,0 +1,36 @@
+{
+    "name": "immigrants-data",
+    "version": "1.0.0",
+    "description": "Immigration Data Platform — structured database with REST API",
+    "main": "dist/server.js",
+    "scripts": {
+        "dev": "tsx watch src/server.ts",
+        "build": "tsc",
+        "start": "node dist/server.js",
+        "db:push": "prisma db push",
+        "db:seed": "tsx src/seed/index.ts",
+        "db:studio": "prisma studio",
+        "collect": "tsx src/collectors/run.ts",
+        "collect:oecd": "tsx src/collectors/run.ts oecd",
+        "collect:un": "tsx src/collectors/run.ts un_desa"
+    },
+    "dependencies": {
+        "@fastify/cors": "^11.0.0",
+        "@fastify/multipart": "^9.4.0",
+        "@fastify/rate-limit": "^10.2.0",
+        "@fastify/static": "^9.0.0",
+        "@prisma/client": "^6.5.0",
+        "dotenv": "^16.4.0",
+        "fastify": "^5.2.0",
+        "node-cron": "^3.0.3",
+        "openai": "^6.29.0",
+        "telegraf": "^4.16.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "@types/node-cron": "^3.0.11",
+        "prisma": "^6.5.0",
+        "tsx": "^4.19.0",
+        "typescript": "^5.6.0"
+    }
+}
