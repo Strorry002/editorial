@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: editorial-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: immigrants_data
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-editorial_2026}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal
+
+  app:
+    build: .
+    container_name: editorial-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-editorial_2026}@db:5432/immigrants_data
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-@theimmigrantsnews}
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-1767332486}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      XAI_API_KEY: ${XAI_API_KEY}
+      CONGRESS_API_KEY: ${CONGRESS_API_KEY}
+      NEWSDATA_API_KEY: ${NEWSDATA_API_KEY}
+      FACEBOOK_PAGE_ID: ${FACEBOOK_PAGE_ID}
+      FACEBOOK_PAGE_TOKEN: ${FACEBOOK_PAGE_TOKEN}
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID}
+      AUTOPILOT_ENABLED: ${AUTOPILOT_ENABLED:-true}
+      SITE_URL: https://theimmigrants.news
+      PORT: "4100"
+      HOST: "0.0.0.0"
+      NODE_ENV: production
+    volumes:
+      - covers:/app/public/covers
+      - ./data:/app/data
+    networks:
+      - internal
+      - immigrants-net
+
+volumes:
+  pgdata:
+  covers:
+
+
+networks:
+  internal:
+    driver: bridge
+  immigrants-net:
+    name: immigrants-net
+    driver: bridge

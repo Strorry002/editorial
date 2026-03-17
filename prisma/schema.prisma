@@ -229,6 +229,26 @@ model Distribution {
 }
 
 // ============================================================================
+// AGENTS — AI journalist personas with configurable styles
+// ============================================================================
+
+model Agent {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  displayName String   @default("")  // public byline: "Sarah Mitchell"
+  avatar      String?               // emoji avatar
+  role        String   @default("journalist") // journalist, editor, reviewer
+  basePrompt  String                // hardcoded journalist DNA
+  stylePrompt String   @default("") // user-defined: tone, voice, quirks
+  formatting  Json     @default("{}") // { length, useEmoji, headerStyle, etc }
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  articles    Article[]
+}
+
+// ============================================================================
 // ARTICLES — Editorial content built from LegalUpdates
 // ============================================================================
 
@@ -243,12 +263,16 @@ model Article {
 
   tags            String[]
   region          String?
-  language        String    @default("ru")
+  language        String    @default("en")
 
   status          String    @default("idea") // idea, outline, draft, review, approved, published, archived
   author          String?
+  agentId         String?
   reviewer        String?
   reviewNote      String?
+  needsResearch   Boolean   @default(false)
+  researchNote    String?
+  stageUpdatedAt  DateTime  @default(now()) // tracks when status last changed (for auto-progression)
 
   metaTitle       String?
   metaDescription String?
@@ -258,6 +282,7 @@ model Article {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  agent           Agent?   @relation(fields: [agentId], references: [id])
   sources         ArticleSource[]
   distributions   ArticleDistribution[]
 
@@ -340,4 +365,123 @@ model CollectionLog {
 
   @@index([sourceName])
   @@index([createdAt])
+}
+
+// ============================================================================
+// SUBSCRIBER — Newsletter subscribers with topic preferences
+// ============================================================================
+
+model Subscriber {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  topics        String[]  // visas, labor, asylum, digital-nomad, cost-of-living, statistics
+  lang          String    @default("en")
+  verified      Boolean   @default(false)
+  active        Boolean   @default(true)
+  subscribedAt  DateTime  @default(now())
+  unsubscribedAt DateTime?
+  metadata      Json      @default("{}")
+
+  @@index([active])
+}
+
+// ============================================================================
+// USER — Registered users for comments & interactions
+// ============================================================================
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String
+  displayName    String
+  role           String    @default("user")  // user, moderator, admin
+  isActive       Boolean   @default(true)
+  avatarUrl      String?
+  telegramHandle String?               // @username for notifications
+  bio            String?
+  createdAt      DateTime  @default(now())
+  lastLoginAt    DateTime?
+
+  comments       Comment[]
+  likes          Like[]
+  bookmarks      Bookmark[]
+  collections    Collection[]
+
+  @@index([email])
+}
+
+// ============================================================================
+// COMMENT — Article comments
+// ============================================================================
+
+model Comment {
+  id        String    @id @default(uuid())
+  body      String
+  articleId String
+  userId    String
+  parentId  String?   // reply to another comment
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+
+  @@index([articleId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+// ============================================================================
+// LIKE — Article likes (one per user per article)
+// ============================================================================
+
+model Like {
+  id        String   @id @default(uuid())
+  userId    String
+  articleId String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, articleId])
+  @@index([articleId])
+}
+
+// ============================================================================
+// BOOKMARK — Saved articles, optionally in a collection
+// ============================================================================
+
+model Bookmark {
+  id           String      @id @default(uuid())
+  userId       String
+  articleId    String
+  collectionId String?
+  createdAt    DateTime    @default(now())
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, articleId])
+  @@index([userId])
+  @@index([collectionId])
+}
+
+// ============================================================================
+// COLLECTION — User-created folders for bookmarks
+// ============================================================================
+
+model Collection {
+  id        String     @id @default(uuid())
+  userId    String
+  name      String
+  color     String     @default("#a855f7")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookmarks Bookmark[]
+
+  @@unique([userId, name])
+  @@index([userId])
 }

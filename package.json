@@ -20,8 +20,12 @@
         "@fastify/rate-limit": "^10.2.0",
         "@fastify/static": "^9.0.0",
         "@prisma/client": "^6.5.0",
+        "@types/bcrypt": "^6.0.0",
+        "@types/jsonwebtoken": "^9.0.10",
+        "bcrypt": "^6.0.0",
         "dotenv": "^16.4.0",
         "fastify": "^5.2.0",
+        "jsonwebtoken": "^9.0.3",
         "node-cron": "^3.0.3",
         "openai": "^6.29.0",
         "telegraf": "^4.16.0"

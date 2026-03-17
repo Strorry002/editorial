@@ -57,6 +57,49 @@ export class RSSFeedsCollector extends BaseCollector {
             defaultCategory: 'visa',
             defaultImpactLevel: 'high',
         },
+        // ═══ NEW SOURCES ═══
+        {
+            name: 'SchengenVisaInfo',
+            url: 'https://www.schengenvisainfo.com/news/feed/',
+            countryCode: 'DE', // EU/Schengen general
+            defaultCategory: 'visa',
+            defaultImpactLevel: 'medium',
+        },
+        {
+            name: 'Canada Immigration News',
+            url: 'https://canadaimmigration.news/feed/',
+            countryCode: 'CA',
+            defaultCategory: 'visa',
+            defaultImpactLevel: 'medium',
+        },
+        {
+            name: 'Migration Policy Institute',
+            url: 'https://www.migrationpolicy.org/rss/migration-news',
+            countryCode: 'US', // global/US focus
+            defaultCategory: 'visa',
+            defaultImpactLevel: 'high',
+        },
+        {
+            name: 'VisaGuide.World',
+            url: 'https://visaguide.world/news/feed/',
+            countryCode: 'DE', // global
+            defaultCategory: 'visa',
+            defaultImpactLevel: 'medium',
+        },
+        {
+            name: 'USCIS News',
+            url: 'https://www.uscis.gov/rss/news',
+            countryCode: 'US',
+            defaultCategory: 'visa',
+            defaultImpactLevel: 'high',
+        },
+        {
+            name: 'IOM — UN Migration',
+            url: 'https://www.iom.int/news/rss.xml',
+            countryCode: 'US', // global
+            defaultCategory: 'asylum',
+            defaultImpactLevel: 'high',
+        },
     ];
 
     async collect(): Promise<CollectorResult> {

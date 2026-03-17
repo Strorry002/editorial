@@ -72,22 +72,18 @@ body {
 .sidebar-brand {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 0 20px 24px;
+    justify-content: center;
+    padding: 8px 16px 20px;
     border-bottom: 1px solid var(--border);
     margin-bottom: 12px;
 }
 
-.brand-icon {
-    font-size: 24px;
-}
-
-.brand-text {
-    font-size: 16px;
-    font-weight: 700;
-    background: linear-gradient(135deg, var(--accent), var(--cyan));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+.brand-logo {
+    width: auto;
+    height: 56px;
+    max-width: 180px;
+    object-fit: contain;
+    filter: invert(1) hue-rotate(180deg);
 }
 
 .nav-list {

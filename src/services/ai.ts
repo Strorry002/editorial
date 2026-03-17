@@ -1,8 +1,15 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+// AI Provider — xAI Grok (preferred) or OpenAI (fallback)
+const useXAI = !!process.env.XAI_API_KEY;
+const xai = new OpenAI({
+    apiKey: useXAI ? process.env.XAI_API_KEY : process.env.OPENAI_API_KEY,
+    baseURL: useXAI ? 'https://api.x.ai/v1' : undefined,
 });
+
+export const AI_MODEL = useXAI ? 'grok-3-mini-fast' : 'gpt-4o-mini';
+export const AI_IMAGE_MODEL = useXAI ? 'grok-imagine-image' : 'dall-e-3';
+console.log(`[ai] Using ${useXAI ? 'xAI Grok' : 'OpenAI'} (model: ${AI_MODEL})`);
 
 interface SourceMaterial {
     title: string;
@@ -26,12 +33,13 @@ interface GenerateResult {
 
 /**
  * Generate an article draft from source LegalUpdate materials.
- * Uses GPT-4o-mini for cost efficiency (~$0.01 per article).
+ * Uses Grok grok-3-mini-fast for cost efficiency.
  */
 export async function generateArticleDraft(
     existingTitle: string,
     sources: SourceMaterial[],
-    language: string = 'ru',
+    language: string = 'en',
+    agentStyle?: string | null,
 ): Promise<GenerateResult> {
 
     const sourcesText = sources.map((s, i) => `
@@ -71,6 +79,11 @@ Rules:
 - Do NOT invent facts — use ONLY the provided source materials
 `;
 
+    // Inject agent persona if available
+    const finalPrompt = agentStyle
+        ? `${agentStyle}\n\n${systemPrompt.trim()}`
+        : systemPrompt;
+
     const userPrompt = `
 Create an article based on these source materials.
 
@@ -89,10 +102,10 @@ Respond in JSON format:
 }
 `;
 
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+    const completion = await xai.chat.completions.create({
+        model: AI_MODEL,
         messages: [
-            { role: 'system', content: systemPrompt.trim() },
+            { role: 'system', content: finalPrompt.trim() },
             { role: 'user', content: userPrompt.trim() },
         ],
         temperature: 0.7,
@@ -101,11 +114,10 @@ Respond in JSON format:
     });
 
     const content = completion.choices[0]?.message?.content;
-    if (!content) throw new Error('Empty response from OpenAI');
+    if (!content) throw new Error('Empty response from xAI Grok');
 
     const result = JSON.parse(content) as GenerateResult;
 
-    // Ensure all fields present
     return {
         title: result.title || existingTitle,
         excerpt: result.excerpt || '',
@@ -117,7 +129,6 @@ Respond in JSON format:
 
 /**
  * Generate a cover image prompt from article metadata.
- * Returns a DALL-E / SD prompt string.
  */
 export function generateCoverPrompt(title: string, tags: string[], countryFlags: string[]): string {
     const tagStr = tags.join(', ');
@@ -127,16 +138,47 @@ export function generateCoverPrompt(title: string, tags: string[], countryFlags:
 }
 
 /**
- * Generate cover image via DALL-E 3
+ * Generate cover image via xAI Grok grok-2-image
  */
 export async function generateCoverImage(prompt: string): Promise<string> {
-    const response = await openai.images.generate({
-        model: 'dall-e-3',
+    const response = await xai.images.generate({
+        model: AI_IMAGE_MODEL,
         prompt,
         n: 1,
-        size: '1792x1024', // ~16:9
-        quality: 'standard',
     });
 
     return response.data?.[0]?.url || '';
+}
+
+/**
+ * Generate a photorealistic agent avatar
+ */
+export async function generateAgentAvatar(description: string): Promise<string> {
+    const prompt = `Professional headshot portrait photo of ${description}. Neutral grey studio background, soft lighting, editorial style, looking at camera, confident expression, shoulders visible. Photorealistic, high quality, 1:1 square crop.`;
+
+    try {
+        const response = await xai.images.generate({
+            model: AI_IMAGE_MODEL,
+            prompt,
+            n: 1,
+        });
+
+        const url = response.data?.[0]?.url;
+        if (!url) {
+            console.error('[avatar] xAI returned no URL. Response:', JSON.stringify(response.data || response));
+            throw new Error('xAI returned no image URL');
+        }
+        console.log('[avatar] Generated:', url.substring(0, 80) + '...');
+        return url;
+    } catch (err: any) {
+        console.error('[avatar] Generation failed:', err.message, err.status || '', err.code || '');
+        throw new Error(`Avatar generation failed: ${err.message}`);
+    }
+}
+
+/**
+ * Get xAI client instance for external use
+ */
+export function getXAIClient(): OpenAI {
+    return xai;
 }

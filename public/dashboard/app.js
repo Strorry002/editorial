@@ -31,7 +31,7 @@ async function loadPage(page) {
     const titles = {
         overview: 'Overview', sources: 'Data Sources', logs: 'Collection Logs',
         updates: 'Legal Updates', countries: 'Countries',
-        publications: 'Publications', articles: 'Articles',
+        editorial: 'Editorial', agents: 'AI Agents',
     };
     $title.textContent = titles[page] || page;
     try {
@@ -41,8 +41,8 @@ async function loadPage(page) {
             case 'logs': await renderLogs(); break;
             case 'updates': await renderUpdates(); break;
             case 'countries': await renderCountries(); break;
-            case 'publications': await renderPublications(); break;
-            case 'articles': await renderArticles(); break;
+            case 'editorial': await renderEditorial(); break;
+            case 'agents': await renderAgents(); break;
         }
     } catch (err) {
         $content.innerHTML = `<div class="empty-state"><div class="icon">Warning</div><div class="msg">Error: ${err.message}</div></div>`;
@@ -289,7 +289,7 @@ async function renderPublications() {
                             ${col.label}
                             <span class="kanban-col-count">${items.length}</span>
                         </div>
-                        <div class="kanban-col-body">
+                        <div class="kanban-col-body" data-col="${col.key}" ondragover="event.preventDefault();this.style.background='rgba(99,102,241,0.08)'" ondragleave="this.style.background=''" ondrop="dropPubCard(event,'${col.key}');this.style.background=''">
                             ${items.length === 0 ? `<div style="text-align:center;padding:20px;color:var(--text-dim);font-size:11px">${col.desc}</div>` :
                 items.map(u => renderPubCard(u, col.key)).join('')}
                         </div>
@@ -339,27 +339,51 @@ function renderPubCard(u, colKey) {
         body += `<div style="margin:4px 0"><a href="${u.sourceUrl}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none" onclick="event.stopPropagation()">🔗 Source</a></div>`;
     }
 
-    // PUBLISHED or APPROVED: show distribution channels with status
+    // PUBLISHED or APPROVED: show distribution channels with status + published links
     let channelBar = '';
     if (colIdx >= 3) {
         const dists = u.distributions || [];
-        channelBar = `<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
-            ${CHANNELS.map(ch => {
-            const d = dists.find(x => x.channel === ch);
-            if (!d) {
-                // Not yet distributed — show "send" button
-                return `<button class="ch-btn ch-pending" onclick="event.stopPropagation();distributePub('${u.id}','${ch}')" title="Send to ${ch}">${CH_ICONS[ch] || ch[0].toUpperCase()}</button>`;
-            }
-            if (d.status === 'sent') {
-                return `<span class="ch-btn ch-sent" title="${ch}: sent${d.externalUrl ? ' - Click to open' : ''}" ${d.externalUrl ? `onclick="event.stopPropagation();window.open('${d.externalUrl}','_blank')"` : ''}>${CH_ICONS[ch] || ch[0].toUpperCase()} ✓</span>`;
-            }
-            if (d.status === 'error') {
-                return `<button class="ch-btn ch-error" onclick="event.stopPropagation();retryDistribute('${u.id}','${ch}','${d.id}')" title="${ch}: ERROR - Click to retry">${CH_ICONS[ch] || ch[0].toUpperCase()} !</button>`;
-            }
-            // pending
-            return `<span class="ch-btn ch-pending" title="${ch}: pending">${CH_ICONS[ch] || ch[0].toUpperCase()} ...</span>`;
-        }).join('')}
-        </div>`;
+        const sentDists = dists.filter(d => d.status === 'sent');
+        const errorDists = dists.filter(d => d.status === 'error');
+        const pendingDists = dists.filter(d => d.status === 'pending');
+        const missingCh = CHANNELS.filter(ch => !dists.find(d => d.channel === ch));
+
+        // Published links (prominent)
+        let pubLinks = '';
+        if (sentDists.length) {
+            pubLinks = `<div style="margin-top:6px">
+                <div style="font-size:9px;color:var(--text-dim);font-weight:600;margin-bottom:3px">PUBLISHED:</div>
+                ${sentDists.map(d => {
+                const icon = CH_ICONS[d.channel] || d.channel[0].toUpperCase();
+                if (d.externalUrl) {
+                    return `<a href="${d.externalUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--green);text-decoration:none;margin-right:8px" onclick="event.stopPropagation()" title="Open ${d.channel}">${icon} ${d.channel} ↗</a>`;
+                }
+                return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--green);margin-right:8px">${icon} ${d.channel} ✓</span>`;
+            }).join('')}
+            </div>`;
+        }
+
+        // Errors (retry buttons)
+        let errBtns = '';
+        if (errorDists.length) {
+            errBtns = `<div style="margin-top:4px">
+                ${errorDists.map(d => `<button class="ch-btn ch-error" onclick="event.stopPropagation();retryDistribute('${u.id}','${d.channel}','${d.id}')" title="${d.channel}: ERROR - Retry">${CH_ICONS[d.channel] || d.channel[0].toUpperCase()} retry</button>`).join(' ')}
+            </div>`;
+        }
+
+        // Pending
+        let pendBtns = '';
+        if (pendingDists.length) {
+            pendBtns = pendingDists.map(d => `<span class="ch-btn ch-pending">${CH_ICONS[d.channel] || d.channel[0].toUpperCase()} ...</span>`).join(' ');
+        }
+
+        // Not yet sent
+        let sendBtns = '';
+        if (missingCh.length) {
+            sendBtns = missingCh.map(ch => `<button class="ch-btn" onclick="event.stopPropagation();distributePub('${u.id}','${ch}')" title="Send to ${ch}">${CH_ICONS[ch] || ch[0].toUpperCase()}</button>`).join(' ');
+        }
+
+        channelBar = pubLinks + errBtns + (pendBtns || sendBtns ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${pendBtns}${sendBtns}</div>` : '');
     }
 
     // Workflow buttons
@@ -373,7 +397,7 @@ function renderPubCard(u, colKey) {
     const dateInfo = `<div style="font-size:9px;color:var(--text-dim);margin-top:4px">${renderDates(u)}</div>`;
 
     return `
-        <div class="kanban-card" onclick="openPubCard('${u.id}','${colKey}')" style="cursor:pointer">
+        <div class="kanban-card" draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${u.id}')" onclick="openPubCard('${u.id}','${colKey}')" style="cursor:grab">
             ${header}
             ${body}
             ${channelBar}
@@ -576,13 +600,15 @@ function renderArticleCard(a, tab) {
                     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;font-size:10px">
                         ${(a.tags || []).map(t => `<span class="tag-chip">${t}</span>`).join('')}
                         ${a._count?.sources ? `<span style="color:var(--text-dim)">📎 ${a._count.sources} src</span>` : ''}
-                        ${a.author ? `<span style="color:var(--text-dim)">👤 ${a.author}</span>` : ''}
+                        ${a.agent ? `<span style="color:var(--accent)">${a.agent.avatar || '🤖'} ${a.agent.name}</span>` : (a.author ? `<span style="color:var(--text-dim)">👤 ${a.author}</span>` : '')}
                         ${channelDots(a.distributions)}
                     </div>
                 </div>
                 <div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap">
                     ${prevTab ? `<button class="workflow-btn" onclick="moveArticle('${a.id}','${prevTab.key}')" title="${prevTab.label}">←</button>` : ''}
                     ${tabDef?.aiEndpoint ? `<button class="workflow-btn" onclick="aiSingleStep('${a.id}','${tabDef.aiEndpoint}')" title="${tabDef.aiAction}">🤖</button>` : ''}
+                    ${tab === 'idea' || tab === 'outline' ? `<button class="workflow-btn" style="background:var(--accent);color:white" onclick="runArticlePipeline('${a.id}')" title="Full AI Pipeline">⚡</button>` : ''}
+                    ${!a.coverImage && ['draft', 'review', 'approved'].includes(tab) ? `<button class="workflow-btn" onclick="genCover('${a.id}')" title="Generate Cover">🎨</button>` : ''}
                     ${nextTab ? `<button class="workflow-btn primary" onclick="moveArticle('${a.id}','${nextTab.key}')" title="${nextTab.label}">→</button>` : ''}
                     <button class="workflow-btn" onclick="openArticleEditor('${a.id}')" title="Edit">✏️</button>
                 </div>
@@ -828,3 +854,410 @@ async function removeSource(articleId, srcId) {
 
 // -- Init --
 loadPage('overview');
+
+// -- Drag & Drop for Publications Kanban --
+function dropPubCard(event, targetCol) {
+    event.preventDefault();
+    const id = event.dataTransfer.getData('text/plain');
+    if (id) movePub(id, targetCol);
+}
+
+// ===========================================================
+// ===========================================================
+// EDITORIAL — Unified Pipeline Kanban
+// ===========================================================
+
+const EDIT_COLS = [
+    { key: 'inbox', label: 'Inbox', color: '#6366f1', desc: 'Raw news items from collectors', status: null },
+    { key: 'grouped', label: 'Grouped', color: '#f59e0b', desc: 'AI-grouped into article topics', status: 'idea' },
+    { key: 'draft', label: 'Draft', color: '#3b82f6', desc: 'Article being written', status: 'draft' },
+    { key: 'review', label: 'Review', color: '#8b5cf6', desc: 'Under editorial review', status: 'review' },
+    { key: 'ready', label: 'Ready', color: '#10b981', desc: 'Approved, awaiting publish', status: 'approved' },
+    { key: 'published', label: 'Published', color: '#06b6d4', desc: 'Live on channels', status: 'published' },
+];
+
+async function renderEditorial() {
+    // Fetch both raw inbox + article kanban
+    const [pubKanban, artKanban, agents] = await Promise.all([
+        api('/publications/kanban'),
+        api('/articles/kanban'),
+        api('/agents'),
+    ]);
+
+    const inbox = pubKanban.raw || [];
+    const grouped = [...(artKanban.idea || []), ...(artKanban.outline || [])];
+    const drafts = artKanban.draft || [];
+    const reviews = artKanban.review || [];
+    const ready = artKanban.approved || [];
+    const published = artKanban.published || [];
+    const total = inbox.length + grouped.length + drafts.length + reviews.length + ready.length + published.length;
+
+    const colData = { inbox, grouped, draft: drafts, review: reviews, ready, published };
+
+    $content.innerHTML = `
+        <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span class="badge badge-info">${total} items</span>
+            <button class="workflow-btn primary" onclick="editorialAutopilot()">AI Autopilot</button>
+            <button class="workflow-btn" onclick="editorialChiefEditor()">Chief Editor</button>
+        </div>
+        <div class="kanban-board">
+            ${EDIT_COLS.map(col => {
+        const items = colData[col.key] || [];
+        return `
+                    <div class="kanban-col">
+                        <div class="kanban-col-header" style="border-top:2px solid ${col.color}">
+                            ${col.label}
+                            <span class="kanban-col-count">${items.length}</span>
+                        </div>
+                        <div class="kanban-col-body" data-col="${col.key}"
+                             ondragover="event.preventDefault();this.style.background='rgba(99,102,241,0.08)'"
+                             ondragleave="this.style.background=''"
+                             ondrop="dropEditCard(event,'${col.key}');this.style.background=''">
+                            ${items.length === 0
+                ? `<div style="text-align:center;padding:24px 8px;color:var(--text-dim);font-size:11px">${col.desc}</div>`
+                : items.map(item => renderEditCard(item, col.key, agents)).join('')}
+                        </div>
+                    </div>
+                `;
+    }).join('')}
+        </div>
+    `;
+}
+
+function renderEditCard(item, colKey, agents) {
+    if (colKey === 'inbox') return renderInboxCard(item);
+    return renderPipelineCard(item, colKey, agents);
+}
+
+function renderInboxCard(u) {
+    const flag = u.country?.flag || '🌐';
+    const cat = u.category || '';
+    const impact = u.impactLevel === 'high' ? 'HIGH' : u.impactLevel === 'medium' ? 'MED' : 'LOW';
+    return `
+        <div class="kanban-card" style="cursor:default">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                <span style="font-size:16px">${flag}</span>
+                <span style="font-size:11px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${u.title}</span>
+                <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:${u.impactLevel === 'high' ? 'var(--red)' : u.impactLevel === 'medium' ? 'var(--yellow)' : 'var(--green)'};color:#fff;font-weight:600">${impact}</span>
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">${cat} · ${u.countryCode || ''}</div>
+            ${u.summary ? `<div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;line-height:1.3">${u.summary.substring(0, 100)}${u.summary.length > 100 ? '...' : ''}</div>` : ''}
+        </div>
+    `;
+}
+
+function renderPipelineCard(a, colKey, agents) {
+    const agentName = a.agent?.displayName || a.agent?.name || a.author || '';
+    const coverThumb = a.coverImage ? `<img src="${a.coverImage}" style="width:44px;height:30px;object-fit:cover;border-radius:3px;flex-shrink:0">` : '';
+
+    // Progressive content based on stage
+    let body = '';
+    if (colKey === 'grouped') {
+        body = `<div style="font-size:10px;color:var(--text-dim)">${a._count?.sources || 0} sources</div>`;
+    } else if (colKey === 'draft') {
+        const words = a.body ? a.body.split(/\s+/).length : 0;
+        body = `<div style="font-size:10px;color:var(--text-dim)">${words} words</div>`;
+        if (a.excerpt) body += `<div style="font-size:10px;color:var(--text-secondary);margin-top:2px;line-height:1.3">${a.excerpt.substring(0, 80)}...</div>`;
+    } else if (colKey === 'review') {
+        body = a.reviewNote
+            ? `<div style="font-size:10px;color:var(--yellow);margin-top:2px">${a.reviewNote.substring(0, 80)}...</div>`
+            : `<div style="font-size:10px;color:var(--text-dim)">Awaiting review</div>`;
+        if (a.needsResearch) body += `<div style="font-size:9px;color:var(--yellow);margin-top:2px;font-weight:600">Needs Research</div>`;
+    } else if (colKey === 'ready') {
+        const words = a.body ? a.body.split(/\s+/).length : 0;
+        body = `<div style="font-size:10px;color:var(--green)">${words} words · ready to publish</div>`;
+        if (a.researchNote) body += `<div style="font-size:9px;color:var(--cyan);margin-top:2px">Researched</div>`;
+    } else if (colKey === 'published') {
+        const dists = (a.distributions || []).filter(d => d.status === 'sent');
+        const siteUrl = `http://localhost:3003/articles/${a.slug || a.id}`;
+        body = `<div style="display:flex;flex-direction:column;gap:3px">`;
+        if (dists.length) body += `<div style="font-size:10px;color:var(--green)">${dists.map(d => d.channel).join(', ')}</div>`;
+        body += `<a href="${siteUrl}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:underline" onclick="event.stopPropagation()">View on site</a></div>`;
+    }
+
+    // Action buttons by stage
+    let actions = '';
+    if (colKey === 'grouped') {
+        actions = `
+            <button class="workflow-btn" style="background:var(--accent);color:white;font-size:9px;padding:2px 6px" onclick="event.stopPropagation();runArticlePipeline('${a.id}')" title="Full AI Pipeline">Pipeline</button>
+        `;
+    } else if (colKey === 'draft' || colKey === 'review' || colKey === 'ready') {
+        actions = !a.coverImage ? `<button class="workflow-btn" style="font-size:9px;padding:2px 6px" onclick="event.stopPropagation();genCover('${a.id}')" title="Generate Cover">Cover</button>` : '';
+        // Research button
+        actions += `<button class="workflow-btn" style="font-size:9px;padding:2px 6px" onclick="event.stopPropagation();runResearch('${a.id}')" title="AI Research & Verification">Research</button>`;
+        // Add view link for ready articles
+        if (colKey === 'ready') {
+            const siteUrl = `http://localhost:3003/articles/${a.slug || a.id}`;
+            actions += `<a href="${siteUrl}" target="_blank" style="font-size:9px;padding:2px 6px;color:var(--accent);text-decoration:underline" onclick="event.stopPropagation()">View</a>`;
+        }
+    }
+
+    return `
+        <div class="kanban-card" draggable="true"
+             ondragstart="event.dataTransfer.setData('text/plain','art:${a.id}')"
+             onclick="openArticleEditor('${a.id}')"
+             style="cursor:grab">
+            <div style="display:flex;gap:6px;align-items:flex-start">
+                ${coverThumb}
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:11px;font-weight:600;line-height:1.3;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.title}</div>
+                    ${agentName ? `<div style="font-size:9px;color:var(--accent)">${agentName}</div>` : ''}
+                </div>
+            </div>
+            ${body}
+            <div style="display:flex;gap:4px;margin-top:4px;align-items:center;flex-wrap:wrap">
+                ${(a.tags || []).slice(0, 3).map(t => `<span style="font-size:8px;padding:1px 4px;background:var(--bg-surface);border-radius:3px;color:var(--text-dim)">${t}</span>`).join('')}
+                <div style="flex:1"></div>
+                ${actions}
+            </div>
+        </div>
+    `;
+}
+
+// Drag & drop for editorial kanban
+function dropEditCard(event, targetCol) {
+    event.preventDefault();
+    const raw = event.dataTransfer.getData('text/plain');
+    if (!raw) return;
+
+    if (raw.startsWith('art:')) {
+        const articleId = raw.substring(4);
+        // Map column to article status
+        const statusMap = { grouped: 'idea', draft: 'draft', review: 'review', ready: 'approved', published: 'published' };
+        const newStatus = statusMap[targetCol];
+        if (newStatus) {
+            apiPatch(`/articles/${articleId}`, { status: newStatus }).then(() => renderEditorial());
+        }
+    }
+}
+
+async function editorialAutopilot() {
+    const btn = event?.target;
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+    try {
+        const result = await apiPost('/articles/autopilot', { autoDraft: false, hoursBack: 720 });
+        alert(`Autopilot: ${result.created} articles created, ${result.drafted} drafted`);
+        renderEditorial();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+    if (btn) { btn.textContent = '🤖 AI Autopilot'; btn.disabled = false; }
+}
+
+async function editorialChiefEditor() {
+    const btn = event?.target;
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+    try {
+        const result = await apiPost('/articles/chief-editor', {});
+        alert(`Chief Editor: ${result.progressed} progressed\n${(result.details || []).join('\n')}`);
+        renderEditorial();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+    if (btn) { btn.textContent = '👔 Chief Editor'; btn.disabled = false; }
+}
+
+// ===========================================================
+// AGENTS -- Management UI
+// ===========================================================
+
+let _agentsCache = [];
+
+async function renderAgents() {
+    _agentsCache = await api('/agents');
+
+    $content.innerHTML = `
+        <div style="margin-bottom:16px;display:flex;align-items:center;gap:12px">
+            <span class="badge badge-info">${_agentsCache.length} agents</span>
+            <button class="workflow-btn primary" onclick="seedAgents()">Seed Defaults</button>
+            <button class="workflow-btn" onclick="showCreateAgent()">+ New Agent</button>
+            <button class="workflow-btn" onclick="runChiefEditorNow()">Run Chief Editor</button>
+        </div>
+
+        <div id="agent-form-area"></div>
+
+        <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+            ${_agentsCache.map(a => `
+                <div class="stat-card" style="border-left:3px solid ${a.role === 'editor' ? 'var(--yellow)' : a.role === 'reviewer' ? 'var(--purple)' : 'var(--accent)'}">
+                    <div style="margin-bottom:12px">
+                        <div style="font-size:18px;font-weight:700">${a.displayName || a.name}</div>
+                        <div style="font-size:10px;color:var(--text-dim)">${a.name} · ${a.role} · ${a._count?.articles || 0} articles</div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4">
+                        <strong>Style:</strong> ${a.stylePrompt || '(default)'}
+                    </div>
+                    <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px;padding:6px;background:var(--bg-surface);border-radius:4px;max-height:60px;overflow:hidden">
+                        <strong>Base:</strong> ${a.basePrompt.substring(0, 150)}...
+                    </div>
+                    ${a.formatting && Object.keys(a.formatting).length ? `
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+                            ${Object.entries(a.formatting).map(([k, v]) => `<span class="badge badge-dim" style="font-size:9px">${k}: ${v}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                    <div style="display:flex;gap:6px">
+                        <button class="workflow-btn" onclick="editAgent('${a.id}')">Edit</button>
+                        <button class="workflow-btn" style="color:var(--red)" onclick="deleteAgent('${a.id}')">Delete</button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+async function seedAgents() {
+    await apiPost('/agents/seed', {});
+    renderAgents();
+}
+
+async function runChiefEditorNow() {
+    const result = await apiPost('/articles/chief-editor', {});
+    alert('Chief Editor: ' + result.progressed + ' articles progressed\n' + (result.details || []).join('\n'));
+}
+
+function showCreateAgent() {
+    const area = document.getElementById('agent-form-area');
+    area.innerHTML = `
+        <div class="card" style="margin-bottom:16px">
+            <div class="card-header"><div class="card-title">New Agent</div></div>
+            <div class="card-body">
+                <div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;font-size:12px">
+                    <label>Display Name:</label><input id="ag-displayname" class="editor-textarea" style="height:auto;padding:6px" placeholder="e.g. Sarah Mitchell">
+                    <label>Internal ID:</label><input id="ag-name" class="editor-textarea" style="height:auto;padding:6px" placeholder="e.g. storyteller">
+                    <label>Role:</label>
+                    <select id="ag-role" class="editor-textarea" style="height:auto;padding:6px">
+                        <option value="journalist">Journalist</option>
+                        <option value="editor">Editor</option>
+                        <option value="reviewer">Reviewer</option>
+                    </select>
+                    <label>Style:</label><textarea id="ag-style" class="editor-textarea" rows="2" placeholder="Tone, voice, quirks..."></textarea>
+                    <label>Length:</label>
+                    <select id="ag-length" class="editor-textarea" style="height:auto;padding:6px">
+                        <option value="short">Short (300-500 words)</option>
+                        <option value="medium" selected>Medium (800-1200 words)</option>
+                        <option value="long">Long (1500+ words)</option>
+                    </select>
+                </div>
+                <div style="margin-top:10px;display:flex;gap:8px">
+                    <button class="workflow-btn primary" onclick="saveNewAgent()">Create</button>
+                    <button class="workflow-btn" onclick="document.getElementById('agent-form-area').innerHTML=''">Cancel</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function saveNewAgent() {
+    const name = document.getElementById('ag-name').value;
+    const displayName = document.getElementById('ag-displayname').value;
+    const role = document.getElementById('ag-role').value;
+    const stylePrompt = document.getElementById('ag-style').value;
+    const length = document.getElementById('ag-length').value;
+
+    if (!name) return alert('Internal ID required');
+    if (!displayName) return alert('Display Name required');
+
+    await apiPost('/agents', {
+        name, displayName, role, stylePrompt,
+        formatting: { length, useEmoji: false, headerStyle: 'h2' },
+    });
+    renderAgents();
+}
+
+async function editAgent(id) {
+    const a = _agentsCache.find(x => x.id === id);
+    if (!a) return;
+
+    const area = document.getElementById('agent-form-area');
+    area.innerHTML = `
+        <div class="card" style="margin-bottom:16px">
+            <div class="card-header"><div class="card-title">Edit: ${a.displayName || a.name}</div></div>
+            <div class="card-body">
+                <div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;font-size:12px">
+                    <label>Display Name:</label><input id="ag-displayname" class="editor-textarea" style="height:auto;padding:6px" value="${a.displayName || ''}">
+                    <label>Internal ID:</label><input id="ag-name" class="editor-textarea" style="height:auto;padding:6px" value="${a.name}">
+                    <label>Role:</label>
+                    <select id="ag-role" class="editor-textarea" style="height:auto;padding:6px">
+                        <option value="journalist" ${a.role === 'journalist' ? 'selected' : ''}>Journalist</option>
+                        <option value="editor" ${a.role === 'editor' ? 'selected' : ''}>Editor</option>
+                        <option value="reviewer" ${a.role === 'reviewer' ? 'selected' : ''}>Reviewer</option>
+                    </select>
+                    <label>Style:</label><textarea id="ag-style" class="editor-textarea" rows="3">${a.stylePrompt || ''}</textarea>
+                    <label>Base Prompt:</label><textarea id="ag-base" class="editor-textarea" rows="4">${a.basePrompt}</textarea>
+                    <label>Length:</label>
+                    <select id="ag-length" class="editor-textarea" style="height:auto;padding:6px">
+                        <option value="short" ${a.formatting?.length === 'short' ? 'selected' : ''}>Short</option>
+                        <option value="medium" ${a.formatting?.length === 'medium' ? 'selected' : ''}>Medium</option>
+                        <option value="long" ${a.formatting?.length === 'long' ? 'selected' : ''}>Long</option>
+                    </select>
+                </div>
+                <div style="margin-top:10px;display:flex;gap:8px">
+                    <button class="workflow-btn primary" onclick="saveEditAgent('${id}')">Save</button>
+                    <button class="workflow-btn" onclick="document.getElementById('agent-form-area').innerHTML=''">Cancel</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function saveEditAgent(id) {
+    const data = {
+        name: document.getElementById('ag-name').value,
+        displayName: document.getElementById('ag-displayname').value,
+        role: document.getElementById('ag-role').value,
+        stylePrompt: document.getElementById('ag-style').value,
+        basePrompt: document.getElementById('ag-base').value,
+        formatting: {
+            length: document.getElementById('ag-length').value,
+            useEmoji: false,
+            headerStyle: 'h2',
+        },
+    };
+    await apiPatch(`/agents/${id}`, data);
+    renderAgents();
+}
+
+async function deleteAgent(id) {
+    if (!confirm('Delete this agent?')) return;
+    await apiDelete(`/agents/${id}`);
+    renderAgents();
+}
+
+// -- Article Pipeline & Cover --
+async function runArticlePipeline(articleId) {
+    if (!confirm('Run full AI pipeline (outline → draft → review → approve)?')) return;
+    const btn = event?.target;
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+    try {
+        const result = await apiPost(`/articles/${articleId}/run-pipeline`, {});
+        alert('Pipeline: ' + result.status + '\n' + (result.steps || []).join(' → '));
+        renderEditorial();
+    } catch (e) {
+        alert('Pipeline error: ' + e.message);
+        if (btn) { btn.textContent = 'Pipeline'; btn.disabled = false; }
+    }
+}
+
+async function genCover(articleId) {
+    const btn = event?.target;
+    if (btn) { btn.textContent = '...'; btn.disabled = true; }
+    try {
+        await apiPost(`/articles/${articleId}/generate-cover`, {});
+        renderEditorial();
+    } catch (e) {
+        alert('Cover generation error: ' + e.message);
+        if (btn) { btn.textContent = 'Cover'; btn.disabled = false; }
+    }
+}
+
+async function runResearch(articleId) {
+    const btn = event?.target;
+    if (btn) { btn.textContent = '...'; btn.disabled = true; }
+    try {
+        const result = await apiPost(`/articles/${articleId}/research`, {});
+        alert(`Research: ${result.verified ? 'Verified' : 'Needs attention'} (${result.confidence}% confidence)`);
+        renderEditorial();
+    } catch (e) {
+        alert('Research error: ' + e.message);
+        if (btn) { btn.textContent = 'Research'; btn.disabled = false; }
+    }
+}

@@ -14,6 +14,12 @@ import { feedRoutes } from './routes/feed.js';
 import { adminRoutes } from './routes/admin.js';
 import { publicationsRoutes } from './routes/publications.js';
 import { articlesRoutes } from './routes/articles.js';
+import { agentsRoutes } from './routes/agents.js';
+import { toolsRoutes } from './routes/tools.js';
+import { subscriberRoutes } from './routes/subscribers.js';
+import { authRoutes } from './routes/auth.js';
+import { commentsRoutes } from './routes/comments.js';
+import { userRoutes } from './routes/user.js';
 
 dotenv.config();
 
@@ -22,7 +28,7 @@ const app = Fastify({ logger: true });
 
 async function start() {
     // Plugins
-    await app.register(cors, { origin: true });
+    await app.register(cors, { origin: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] });
     await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
     await app.register(fastifyMultipart, { limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max
 
@@ -41,6 +47,12 @@ async function start() {
     await app.register(adminRoutes, { prefix: '/api/v1/admin' });
     await app.register(publicationsRoutes, { prefix: '/api/v1/publications' });
     await app.register(articlesRoutes, { prefix: '/api/v1/articles' });
+    await app.register(agentsRoutes, { prefix: '/api/v1/agents' });
+    await app.register(toolsRoutes, { prefix: '/api/v1/tools' });
+    await app.register(subscriberRoutes, { prefix: '/api/v1/subscribers' });
+    await app.register(authRoutes, { prefix: '/api/v1/auth' });
+    await app.register(commentsRoutes, { prefix: '/api/v1/comments' });
+    await app.register(userRoutes, { prefix: '/api/v1/user' });
 
     // Health check
     app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));

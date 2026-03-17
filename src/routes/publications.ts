@@ -16,7 +16,7 @@ export async function publicationsRoutes(app: FastifyInstance) {
                 take: status === 'raw' ? 30 : 50,
                 include: {
                     country: { select: { name: true, flag: true } },
-                    distributions: { select: { channel: true, status: true } },
+                    distributions: { select: { id: true, channel: true, status: true, externalUrl: true, sentAt: true } },
                     _count: {
                         select: {
                             relationsFrom: true,
