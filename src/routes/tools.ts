@@ -135,15 +135,10 @@ export async function toolsRoutes(app: FastifyInstance) {
 
     // ── AI Nomad Brief ──
     app.post('/nomad-brief', async (request, reply) => {
-        const { city, country, costIndex, rent, meal, internet, hasNomadVisa, visaName, visaDuration, score } =
-            request.body as {
-                city: string; country: string; costIndex: number;
-                rent: number; meal: number; internet: number;
-                hasNomadVisa: boolean; visaName: string | null;
-                visaDuration: string | null; score: number;
-            };
+        const { city: cityName, country: countryName } =
+            request.body as { city: string; country: string };
 
-        if (!city || !country) {
+        if (!cityName || !countryName) {
             reply.status(400);
             return { error: 'City and country required' };
         }
@@ -156,42 +151,126 @@ export async function toolsRoutes(app: FastifyInstance) {
             return { error: 'AI not configured (set XAI_API_KEY or OPENAI_API_KEY)' };
         }
 
+        // Look up REAL data from our database
+        const period = (() => { const now = new Date(); const q = Math.ceil((now.getMonth() + 1) / 3); return `${now.getFullYear()}-Q${q}`; })();
+
+        const city = await (prisma as any).city.findFirst({
+            where: { name: { contains: cityName, mode: 'insensitive' } },
+            include: {
+                country: true,
+                prices: { where: { period } },
+                housing: { where: { period } },
+                safety: { where: { period } },
+                climate: true,
+                infrastructure: { where: { period } },
+                lifestyle: { where: { period } },
+                scores: { where: { period } },
+                alerts: { where: { isActive: true } },
+            },
+        });
+
+        // Look up visa programs for this country
+        const visaPrograms = await (prisma as any).visaProgram.findMany({
+            where: {
+                countryCode: city?.country?.code || countryName,
+                type: { in: ['digital_nomad', 'work', 'freelance'] },
+            },
+            select: { name: true, type: true, duration: true, processingTime: true },
+        });
+
+        // Build data context from DB
+        const priceMap: Record<string, number> = {};
+        for (const p of city?.prices || []) priceMap[p.item] = p.value;
+
+        const rent1br = city?.housing?.find((h: any) => h.type === 'rent_1br_center')?.value;
+        const rent3br = city?.housing?.find((h: any) => h.type === 'rent_3br_center')?.value;
+        const airbnb = city?.housing?.find((h: any) => h.type === 'airbnb_center')?.value;
+
+        const safetyData = city?.safety?.[0];
+        const climateData = city?.climate || [];
+        const infraData = city?.infrastructure?.[0];
+        const lifestyleData = city?.lifestyle?.[0];
+        const scoreData = city?.scores?.[0];
+
+        const currency = city?.country?.currency || 'USD';
+        const nomadVisa = visaPrograms.find((v: any) => v.type === 'digital_nomad');
+        const otherVisas = visaPrograms.filter((v: any) => v.type !== 'digital_nomad');
+
+        const activeAlerts = city?.alerts || [];
+
+        // Build comprehensive prompt with REAL data
+        const dataBlock = `
+=== VERIFIED DATA FROM OUR DATABASE (ALL PRICES IN USD) ===
+City: ${cityName}, ${countryName}
+Local currency: ${currency}
+Nomad Score: ${scoreData?.overall || city?.nomadScore || 'N/A'}/100
+
+COST OF LIVING (all prices already converted to USD):
+- Rent 1BR center: $${rent1br || 'N/A'}/month
+- Rent 3BR center: $${rent3br || 'N/A'}/month
+- Airbnb/month: $${airbnb || 'N/A'}/month
+- Inexpensive meal: $${priceMap['meal_inexpensive'] || 'N/A'}
+- Mid-range dinner for 2: $${priceMap['meal_mid_2people'] || 'N/A'}
+- Big Mac: $${priceMap['bigmac_single'] || 'N/A'}
+- Cappuccino: $${priceMap['cappuccino'] || 'N/A'}
+- Beer (restaurant): $${priceMap['domestic_beer_restaurant'] || 'N/A'}
+- Internet 60mbps: $${priceMap['internet_60mbps'] || 'N/A'}/month
+- Mobile plan: $${priceMap['mobile_plan'] || 'N/A'}/month
+- Basic utilities: $${priceMap['basic_utilities'] || 'N/A'}/month
+- Public transport ticket: $${priceMap['one_way_ticket'] || 'N/A'}
+- Monthly transit pass: $${priceMap['monthly_pass'] || 'N/A'}
+- Taxi 1km: $${priceMap['taxi_1km'] || 'N/A'}
+
+SAFETY:
+${safetyData ? `- Overall safety: ${safetyData.overallScore}/100\n- Night safety: ${safetyData.nightSafety}/100\n- Women safety: ${safetyData.womenSafety}/100\n- Petty crime risk: ${safetyData.pettyCrimeRisk}/100` : '- No safety data yet'}
+
+INFRASTRUCTURE:
+${infraData ? `- Internet speed: ${infraData.internetSpeed || 'N/A'} Mbps\n- Coworking spaces: ${infraData.coworkingSpaces || 'N/A'}\n- Power reliability: ${infraData.powerReliability || 'N/A'}/100` : '- No infra data yet'}
+
+DIGITAL NOMAD VISA:
+${nomadVisa ? `- YES! "${nomadVisa.name}" — duration: ${nomadVisa.duration || 'varies'}, processing: ${nomadVisa.processingTime || 'varies'}` : '- No dedicated digital nomad visa found in our database'}
+${otherVisas.length > 0 ? `Other work visas: ${otherVisas.map((v: any) => `"${v.name}" (${v.duration || 'varies'})`).join(', ')}` : ''}
+
+ACTIVE SAFETY ALERTS:
+${activeAlerts.length > 0 ? activeAlerts.map((a: any) => `- [${a.severity.toUpperCase()}] ${a.title}: ${a.summary}`).join('\n') : '- No active alerts — city is currently safe'}
+===`;
+
+        const prompt = `You are a digital nomad expert advisor at TheImmigrants.news.
+
+CRITICAL RULES:
+1. Use ONLY the verified data provided below. DO NOT invent or guess any numbers.
+2. All prices in the data are already in USD. When mentioning prices, say "around $X" using these exact values.
+3. Also mention the local currency for context (e.g., "around $20/month (~80 ${currency})") when helpful.
+4. For visa info, use ONLY what's provided. If we say there IS a nomad visa, mention it. If we say there isn't, say so.
+5. If data says "N/A", say "data not yet available" — do NOT make up a number.
+
+${dataBlock}
+
+Write a brief, practical guide about ${cityName}, ${countryName} for a remote worker considering relocating.
+
+Cover these topics (2-3 sentences each):
+1. 💰 Cost of Living — based on the REAL prices above
+2. 🌐 Internet & Coworking — using actual speed data
+3. 🛂 Visa Situation — practical advice based on REAL visa data above
+4. 🏠 Neighborhoods — best areas for nomads
+5. ⚡ Pros & Cons — top 3 each
+6. 💡 Insider Tip — one specific, non-obvious tip
+${activeAlerts.length > 0 ? '7. ⚠️ Current Alerts — mention active safety alerts' : ''}
+
+Keep it practical, current, and under 350 words total. Use emoji headers. Write naturally.`;
+
         const openai = new OpenAI({
             apiKey,
             baseURL: xaiKey ? 'https://api.x.ai/v1' : undefined,
         });
         const model = xaiKey ? 'grok-3-mini-fast' : 'gpt-4o-mini';
 
-        const visaInfo = hasNomadVisa
-            ? `This country has a digital nomad visa: "${visaName}" with duration ${visaDuration}.`
-            : `This country does NOT have a dedicated digital nomad visa.`;
-
-        const prompt = `You are a digital nomad expert advisor. Write a brief, practical guide about ${city}, ${country} for a remote worker considering relocating.
-
-Data:
-- Cost of living index: ${costIndex} (NYC = 100)
-- Average 1BR rent: $${rent}/month
-- Average meal cost: $${meal}
-- Internet cost: $${internet}/month
-- Nomad Score: ${score}/135
-- ${visaInfo}
-
-Cover these topics concisely (2-3 sentences each):
-1. 💰 Cost of Living — is it affordable? What can you expect?
-2. 🌐 Internet & Coworking — quality, speed, coworking spaces
-3. 🛂 Visa Situation — practical advice on staying legally
-4. 🏠 Neighborhoods — best areas for nomads
-5. ⚡ Pros & Cons — top 3 pros and cons
-6. 💡 Insider Tip — one specific, non-obvious tip
-
-Keep it practical, current, and under 300 words total. Use emoji headers. Write naturally, not like a template.`;
-
         try {
             const response = await openai.chat.completions.create({
                 model,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 600,
-                temperature: 0.7,
+                max_tokens: 800,
+                temperature: 0.5, // Lower = more factual
             });
 
             const text = response.choices[0]?.message?.content || 'Unable to generate brief.';
