@@ -27,7 +27,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-editorial_2026}@db:5432/immigrants_data
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-@theimmigrantsnews}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-@theimmigrants_news}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-1767332486}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       XAI_API_KEY: ${XAI_API_KEY}
