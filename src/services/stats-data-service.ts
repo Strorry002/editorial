@@ -223,99 +223,59 @@ export async function runHousingEngine(cityIds?: string[]): Promise<{ processed:
 }
 
 // ============================================================================
-// ENGINE 3: Climate (CityClimate) — Uses Open-Meteo API (free, no key)
+// ENGINE 3: Climate (CityClimate) — AI-powered with realistic monthly data
 // ============================================================================
 
 export async function runClimateEngine(cityIds?: string[]): Promise<{ processed: number; errors: number }> {
     const period = new Date().getFullYear().toString();
     const cities = cityIds
-        ? await prisma.city.findMany({ where: { id: { in: cityIds } } })
-        : await prisma.city.findMany({ where: { lat: { not: null }, lng: { not: null } } });
+        ? await prisma.city.findMany({ where: { id: { in: cityIds } }, include: { country: true } })
+        : await prisma.city.findMany({ include: { country: true } });
 
-    console.log(`[sds:climate] Processing ${cities.length} cities via Open-Meteo`);
+    console.log(`[sds:climate] Processing ${cities.length} cities`);
     let processed = 0, errors = 0;
 
-    for (const city of cities) {
-        try {
-            if (!city.lat || !city.lng) continue;
+    for (let i = 0; i < cities.length; i += 3) {
+        const batch = cities.slice(i, i + 3);
+        await Promise.all(batch.map(async (city) => {
+            try {
+                const existing = await prisma.cityClimate.count({ where: { cityId: city.id, period } });
+                if (existing >= 12) { processed++; return; }
 
-            const existing = await prisma.cityClimate.count({ where: { cityId: city.id, period } });
-            if (existing >= 12) { processed++; continue; }
-
-            // Open-Meteo climate API — historical monthly averages
-            const url = `https://climate-api.open-meteo.com/v1/climate?latitude=${city.lat}&longitude=${city.lng}&start_date=2020-01-01&end_date=2024-12-31&models=EC_Earth3P_HR&monthly=temperature_2m_mean,relative_humidity_2m_mean,precipitation_sum,sunshine_duration`;
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
-            const json = await res.json();
-
-            const monthly = json.monthly;
-            if (!monthly?.time?.length) {
-                // Fallback to AI
-                console.log(`  ⚠️ ${city.name} — Open-Meteo empty, using AI fallback`);
                 const aiData = await askAIForData<{ months: any[] }>(
-                    `City: ${city.name} (lat ${city.lat}, lng ${city.lng})\n\nProvide typical monthly climate data for all 12 months.\nFor each month provide: avgTempC, minTempC, maxTempC, avgHumidity (%), avgRainMm, rainyDays, sunshineHours (per month), uvIndex.\n\nReturn JSON: { "months": [{"month": 1, "avgTempC": 28, ...}, ...] }`,
-                    'You are a climate data scientist. Return ONLY JSON with realistic climate data based on the city latitude and longitude.'
+                    `City: ${city.name}, ${city.country.name} (lat ${city.lat}, lng ${city.lng})\n\nProvide typical monthly climate data for all 12 months.\nFor each month (1-12) provide:\n- month: number (1-12)\n- avgTempC: average temperature in °C\n- minTempC: minimum temperature in °C\n- maxTempC: maximum temperature in °C\n- avgHumidity: average humidity percentage (0-100)\n- avgRainMm: average rainfall in mm for the month\n- rainyDays: number of rainy days in the month\n- sunshineHours: average sunshine hours for the month\n- uvIndex: average UV index\n\nReturn JSON: { "months": [{"month": 1, "avgTempC": 28, "minTempC": 24, "maxTempC": 32, "avgHumidity": 75, "avgRainMm": 50, "rainyDays": 8, "sunshineHours": 180, "uvIndex": 7}, ...] }`,
+                    'You are a climate data scientist. Return ONLY JSON. Provide realistic average monthly climate data based on geographical location and known weather patterns.'
                 );
 
-                if (aiData?.months) {
-                    for (const m of aiData.months) {
-                        await prisma.cityClimate.upsert({
-                            where: { cityId_month_period: { cityId: city.id, month: m.month, period } },
-                            create: { cityId: city.id, month: m.month, avgTempC: m.avgTempC, minTempC: m.minTempC, maxTempC: m.maxTempC, avgHumidity: m.avgHumidity, avgRainMm: m.avgRainMm, rainyDays: m.rainyDays, sunshineHours: m.sunshineHours, uvIndex: m.uvIndex, period, source: 'ai_enrichment' },
-                            update: { avgTempC: m.avgTempC, minTempC: m.minTempC, maxTempC: m.maxTempC, avgHumidity: m.avgHumidity, avgRainMm: m.avgRainMm, rainyDays: m.rainyDays, sunshineHours: m.sunshineHours, uvIndex: m.uvIndex },
-                        });
-                    }
-                    console.log(`  ✅ ${city.name} — 12 months (AI fallback)`);
-                    processed++;
-                } else { errors++; }
-                continue;
+                if (!aiData?.months || aiData.months.length < 12) { errors++; return; }
+
+                for (const m of aiData.months) {
+                    await prisma.cityClimate.upsert({
+                        where: { cityId_month_period: { cityId: city.id, month: m.month, period } },
+                        create: {
+                            cityId: city.id, month: m.month, period,
+                            avgTempC: m.avgTempC, minTempC: m.minTempC, maxTempC: m.maxTempC,
+                            avgHumidity: m.avgHumidity, avgRainMm: m.avgRainMm,
+                            rainyDays: m.rainyDays, sunshineHours: m.sunshineHours,
+                            uvIndex: m.uvIndex, source: 'ai_enrichment',
+                        },
+                        update: {
+                            avgTempC: m.avgTempC, minTempC: m.minTempC, maxTempC: m.maxTempC,
+                            avgHumidity: m.avgHumidity, avgRainMm: m.avgRainMm,
+                            rainyDays: m.rainyDays, sunshineHours: m.sunshineHours,
+                            uvIndex: m.uvIndex,
+                        },
+                    });
+                }
+
+                console.log(`  ✅ ${city.name} — 12 months climate saved`);
+                processed++;
+            } catch (err: any) {
+                console.error(`  ❌ ${city.name}: ${err.message}`);
+                errors++;
             }
-
-            // Aggregate monthly data from 5-year range into averages per month
-            const monthlyAvg: Record<number, { temp: number[]; humidity: number[]; rain: number[]; sunshine: number[] }> = {};
-            for (let i = 0; i < monthly.time.length; i++) {
-                const date = new Date(monthly.time[i]);
-                const m = date.getMonth() + 1;
-                if (!monthlyAvg[m]) monthlyAvg[m] = { temp: [], humidity: [], rain: [], sunshine: [] };
-                if (monthly.temperature_2m_mean?.[i] != null) monthlyAvg[m].temp.push(monthly.temperature_2m_mean[i]);
-                if (monthly.relative_humidity_2m_mean?.[i] != null) monthlyAvg[m].humidity.push(monthly.relative_humidity_2m_mean[i]);
-                if (monthly.precipitation_sum?.[i] != null) monthlyAvg[m].rain.push(monthly.precipitation_sum[i]);
-                if (monthly.sunshine_duration?.[i] != null) monthlyAvg[m].sunshine.push(monthly.sunshine_duration[i] / 3600); // seconds → hours
-            }
-
-            for (let m = 1; m <= 12; m++) {
-                const d = monthlyAvg[m];
-                if (!d) continue;
-                const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
-
-                await prisma.cityClimate.upsert({
-                    where: { cityId_month_period: { cityId: city.id, month: m, period } },
-                    create: {
-                        cityId: city.id, month: m, period,
-                        avgTempC: avg(d.temp) ? Math.round(avg(d.temp)! * 10) / 10 : null,
-                        avgHumidity: avg(d.humidity) ? Math.round(avg(d.humidity)!) : null,
-                        avgRainMm: avg(d.rain) ? Math.round(avg(d.rain)!) : null,
-                        sunshineHours: avg(d.sunshine) ? Math.round(avg(d.sunshine)!) : null,
-                        source: 'open-meteo',
-                    },
-                    update: {
-                        avgTempC: avg(d.temp) ? Math.round(avg(d.temp)! * 10) / 10 : null,
-                        avgHumidity: avg(d.humidity) ? Math.round(avg(d.humidity)!) : null,
-                        avgRainMm: avg(d.rain) ? Math.round(avg(d.rain)!) : null,
-                        sunshineHours: avg(d.sunshine) ? Math.round(avg(d.sunshine)!) : null,
-                    },
-                });
-            }
-
-            console.log(`  ✅ ${city.name} — 12 months (Open-Meteo)`);
-            processed++;
-
-            // Rate limit: 1 request per 200ms for Open-Meteo
-            await new Promise(r => setTimeout(r, 200));
-        } catch (err: any) {
-            console.error(`  ❌ ${city.name}: ${err.message}`);
-            errors++;
-        }
+        }));
+        if (i + 3 < cities.length) await new Promise(r => setTimeout(r, 2000));
     }
 
     console.log(`[sds:climate] Done: ${processed}/${cities.length}`);
