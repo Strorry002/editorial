@@ -514,12 +514,12 @@ export async function runAutonomousNewsroom(options: {
                     });
                     article.coverImage = `/covers/${coverFileName}`;
                 } catch (coverErr: any) {
-                    console.warn(`[newsroom] Cover failed for ${article.id}: ${coverErr.message}`);
+                    console.warn(`[newsroom] Cover generation failed for "${article.title.substring(0, 40)}": ${coverErr.message}`);
+                    // Continue without cover — don't block publishing
                 }
             }
 
-            // Publish to Telegram
-            console.log(`[newsroom] Publishing to Telegram: ${article.title}`);
+            // Build article data for distribution channels
             const articleData = {
                 title: article.title,
                 excerpt: article.excerpt || '',
@@ -530,35 +530,93 @@ export async function runAutonomousNewsroom(options: {
                 author: article.agent?.displayName || article.agent?.name || article.author,
             };
 
-            const tgResult = await publishToTelegram(articleData);
-
-            // Publish to Facebook
-            console.log(`[newsroom] Publishing to Facebook: ${article.title}`);
+            let tgOk = false;
             let fbOk = false;
+
+            // ── Telegram ──
             try {
+                console.log(`[newsroom] Publishing to Telegram: ${article.title.substring(0, 50)}`);
+                const tgResult = await publishToTelegram(articleData);
+                tgOk = tgResult.success;
+
+                // Track distribution in DB
+                await prisma.articleDistribution.upsert({
+                    where: { articleId_channel: { articleId: article.id, channel: 'telegram' } },
+                    create: {
+                        articleId: article.id,
+                        channel: 'telegram',
+                        status: tgResult.success ? 'sent' : 'failed',
+                        format: 'full',
+                        externalId: tgResult.messageId?.toString() || null,
+                        sentAt: tgResult.success ? new Date() : null,
+                        errorMessage: tgResult.error || null,
+                    },
+                    update: {
+                        status: tgResult.success ? 'sent' : 'failed',
+                        externalId: tgResult.messageId?.toString() || null,
+                        sentAt: tgResult.success ? new Date() : null,
+                        errorMessage: tgResult.error || null,
+                    },
+                });
+
+                if (!tgResult.success) {
+                    errors.push(`TG "${article.title.substring(0, 30)}": ${tgResult.error}`);
+                }
+            } catch (tgErr: any) {
+                console.error(`[newsroom] Telegram error for "${article.title.substring(0, 30)}":`, tgErr.message);
+                errors.push(`TG "${article.title.substring(0, 30)}": ${tgErr.message}`);
+            }
+
+            // ── Facebook ──
+            try {
+                console.log(`[newsroom] Publishing to Facebook: ${article.title.substring(0, 50)}`);
                 const { publishToFacebook } = await import('./facebook.js');
                 const fbResult = await publishToFacebook(articleData);
                 fbOk = fbResult.success;
+
+                // Track distribution in DB
+                await prisma.articleDistribution.upsert({
+                    where: { articleId_channel: { articleId: article.id, channel: 'facebook' } },
+                    create: {
+                        articleId: article.id,
+                        channel: 'facebook',
+                        status: fbResult.success ? 'sent' : 'failed',
+                        format: 'full',
+                        externalId: fbResult.postId || null,
+                        sentAt: fbResult.success ? new Date() : null,
+                        errorMessage: fbResult.error || null,
+                    },
+                    update: {
+                        status: fbResult.success ? 'sent' : 'failed',
+                        externalId: fbResult.postId || null,
+                        sentAt: fbResult.success ? new Date() : null,
+                        errorMessage: fbResult.error || null,
+                    },
+                });
+
                 if (!fbResult.success) {
                     errors.push(`FB "${article.title.substring(0, 30)}": ${fbResult.error}`);
                 }
             } catch (fbErr: any) {
+                console.error(`[newsroom] Facebook error for "${article.title.substring(0, 30)}":`, fbErr.message);
                 errors.push(`FB "${article.title.substring(0, 30)}": ${fbErr.message}`);
             }
 
-            if (tgResult.success || fbOk) {
+            // Mark article as published if at least one channel succeeded
+            if (tgOk || fbOk) {
                 await prisma.article.update({
                     where: { id: article.id },
                     data: { status: 'published', publishedAt: new Date(), stageUpdatedAt: new Date() },
                 });
                 published++;
-                const channels = [tgResult.success ? 'TG' : null, fbOk ? 'FB' : null].filter(Boolean).join('+');
+                const channels = [tgOk ? 'TG' : null, fbOk ? 'FB' : null].filter(Boolean).join('+');
                 publishedArticles.push(`📤 "${article.title.substring(0, 50)}" [${channels}]`);
             } else {
                 errors.push(`Publish "${article.title.substring(0, 30)}": both TG and FB failed`);
             }
         } catch (err: any) {
-            errors.push(`Publish "${article.title.substring(0, 30)}": ${err.message}`);
+            console.error(`[newsroom] Fatal error for "${article.title?.substring(0, 30)}":`, err.message);
+            errors.push(`Publish "${article.title?.substring(0, 30)}": ${err.message}`);
         }
     }
 

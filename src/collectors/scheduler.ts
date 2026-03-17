@@ -12,7 +12,7 @@ import { OECDTaxCollector } from './oecd-tax.js';
 import { EULegislationCollector } from './eu-legislation.js';
 import { GovLegislationCollector } from './gov-legislation.js';
 import { CollectorResult } from './base.js';
-import { runAutopilot, runChiefEditor, runAutonomousNewsroom } from '../services/autopilot.js';
+import { runAutonomousNewsroom } from '../services/autopilot.js';
 
 const collectors = [
     new RestCountriesCollector(),
@@ -71,32 +71,8 @@ export function startScheduler() {
         await oecd.run();
     });
 
-    // Daily at 11:00 UTC — Autopilot: group raw updates → create articles → generate drafts
-    cron.schedule('0 11 * * *', async () => {
-        console.log('🤖 Autopilot: grouping raw updates and generating articles...');
-        try {
-            const result = await runAutopilot({ autoDraft: true, hoursBack: 48 });
-            console.log(`🤖 Autopilot done: ${result.created} created, ${result.drafted} drafted, ${result.skipped} skipped`);
-        } catch (err: any) {
-            console.error('🤖 Autopilot error:', err.message);
-        }
-    });
-
-    // Every 3 hours — Chief Editor: auto-progress stuck articles
-    cron.schedule('0 */3 * * *', async () => {
-        console.log('📋 Chief Editor: checking for stuck articles...');
-        try {
-            const result = await runChiefEditor();
-            if (result.progressed > 0) {
-                console.log(`📋 Chief Editor: progressed ${result.progressed} articles`);
-                result.details.forEach(d => console.log(`  → ${d}`));
-            }
-        } catch (err: any) {
-            console.error('📋 Chief Editor error:', err.message);
-        }
-    });
-
-    // Every 6 hours — Autonomous Newsroom: full pipeline + publish + report to owner
+    // Every 6 hours — Autonomous Newsroom: full pipeline
+    // Includes: autopilot (group raw→articles) + chief editor (progress stuck) + publish (TG+FB) + owner report
     cron.schedule('0 */6 * * *', async () => {
         console.log('📰 Autonomous Newsroom: running full pipeline...');
         try {
@@ -106,20 +82,6 @@ export function startScheduler() {
         }
     });
 
-    // One-shot test: run autonomous newsroom in 2 minutes
-    const testDelay = 2 * 60 * 1000; // 2 minutes
-    console.log(`🧪 Test newsroom run scheduled in 2 minutes (${new Date(Date.now() + testDelay).toLocaleTimeString()})`);
-    setTimeout(async () => {
-        console.log('🧪 Test newsroom run starting NOW...');
-        try {
-            await runAutonomousNewsroom({ hoursBack: 72, maxPublish: 3 });
-        } catch (err: any) {
-            console.error('🧪 Test newsroom error:', err.message);
-        }
-    }, testDelay);
-
-    console.log('📅 Scheduler started: daily@06:00 UTC, weekly@Mon 03:00 UTC');
-    console.log('🤖 Autopilot scheduled: daily@11:00 UTC');
-    console.log('📋 Chief Editor scheduled: every 3 hours');
-    console.log('📰 Autonomous Newsroom: every 6 hours');
+    console.log('📅 Scheduler started: daily collection @06:00 UTC, weekly OECD @Mon 03:00 UTC');
+    console.log('📰 Autonomous Newsroom: every 6 hours (includes autopilot + chief editor + publish)');
 }

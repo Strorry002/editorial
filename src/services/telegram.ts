@@ -170,9 +170,28 @@ export async function publishToTelegram(article: ArticleData): Promise<TelegramR
         }
 
         // Step 2: Send full article text (as reply if photo was sent)
+        // Safe truncation — never cut mid-HTML-tag
+        let truncatedText = fullText;
+        if (truncatedText.length > 4096) {
+            truncatedText = truncatedText.substring(0, 4000);
+            // Find the last safe cut point (newline, space, or closing tag)
+            const lastNewline = truncatedText.lastIndexOf('\n');
+            const lastClose = truncatedText.lastIndexOf('>');
+            const cutAt = Math.max(lastNewline, lastClose);
+            if (cutAt > 3000) truncatedText = truncatedText.substring(0, cutAt + 1);
+            // Close any open blockquote
+            if (truncatedText.includes('<blockquote') && !truncatedText.includes('</blockquote>')) {
+                truncatedText += '</blockquote>';
+            }
+            // Re-append the link if it was cut
+            if (!truncatedText.includes(articleUrl)) {
+                truncatedText += `\n\n<a href="${articleUrl}">Read full article →</a>`;
+            }
+        }
+
         const textBody: any = {
             chat_id: CHAT_ID,
-            text: fullText.substring(0, 4096),
+            text: truncatedText,
             parse_mode: 'HTML',
             disable_web_page_preview: true,
         };
