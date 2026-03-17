@@ -263,6 +263,7 @@ model Article {
 
   tags            String[]
   region          String?
+  category        String?               // frontend category slug: north-america, europe, schengen, etc.
   language        String    @default("en")
 
   status          String    @default("idea") // idea, outline, draft, review, approved, published, archived
@@ -289,6 +290,7 @@ model Article {
   @@index([status])
   @@index([publishedAt])
   @@index([language])
+  @@index([category])
 }
 
 model ArticleSource {

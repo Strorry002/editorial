@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { generateArticleDraft, generateCoverPrompt, generateCoverImage } from '../services/ai.js';
 import { runAutopilot, generateOutline, reviewArticle, runFullPipeline, runChiefEditor, generateDraftWithAgent } from '../services/autopilot.js';
 import { publishToTelegram, testTelegramBot } from '../services/telegram.js';
+import { resolveCategory } from '../services/category-resolver.js';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 
@@ -72,6 +73,7 @@ export async function articlesRoutes(app: FastifyInstance) {
             sourceIds?: string[];
             language?: string;
             region?: string;
+            category?: string;
         };
 
         const slug = body.slug || slugify(body.title) + '-' + Date.now().toString(36);
@@ -83,6 +85,7 @@ export async function articlesRoutes(app: FastifyInstance) {
                 tags: body.tags || [],
                 language: body.language || 'en',
                 region: body.region || null,
+                category: body.category || null,
                 sources: body.sourceIds?.length ? {
                     create: body.sourceIds.map((id: string) => ({
                         updateId: id,
@@ -126,6 +129,23 @@ export async function articlesRoutes(app: FastifyInstance) {
         }
 
         return article;
+    });
+
+    // ── Get by Category ─────────────────────────────────────────
+    app.get('/by-category/:category', async (request) => {
+        const { category } = request.params as { category: string };
+        const { limit } = request.query as { limit?: string };
+
+        const articles = await prisma.article.findMany({
+            where: { category, status: 'published' },
+            orderBy: { publishedAt: 'desc' },
+            take: parseInt(limit || '30'),
+            include: {
+                agent: { select: { id: true, name: true, displayName: true, avatar: true } },
+            },
+        });
+
+        return articles;
     });
 
     // ── Get Single ──────────────────────────────────────────────
@@ -172,6 +192,7 @@ export async function articlesRoutes(app: FastifyInstance) {
             coverImage?: string;
             tags?: string[];
             region?: string;
+            category?: string;
             language?: string;
             status?: string;
             author?: string;
@@ -184,7 +205,7 @@ export async function articlesRoutes(app: FastifyInstance) {
 
         const data: any = {};
         const fields = ['title', 'slug', 'excerpt', 'body', 'bodyHtml', 'coverImage',
-            'tags', 'region', 'language', 'status', 'author', 'reviewer', 'reviewNote',
+            'tags', 'region', 'category', 'language', 'status', 'author', 'reviewer', 'reviewNote',
             'metaTitle', 'metaDescription'] as const;
 
         for (const f of fields) {

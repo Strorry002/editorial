@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { generateArticleDraft, getXAIClient, AI_MODEL } from './ai.js';
 import { assignAgent } from './editorial-team.js';
+import { resolveCategory } from './category-resolver.js';
 
 const prisma = new PrismaClient();
 const xai = getXAIClient();
@@ -78,12 +79,17 @@ Rules:
         const slug = slugify(group.title || 'article') + '-' + Date.now().toString(36);
 
         try {
+            // Resolve category from source country codes + tags
+            const countryCodes = [...new Set(sourceUpdates.map((u: any) => u.countryCode).filter(Boolean))] as string[];
+            const articleCategory = resolveCategory(countryCodes, group.tags || [], group.title || '');
+
             const article = await prisma.article.create({
                 data: {
                     title: group.title || 'Untitled',
                     slug,
                     tags: group.tags || [],
                     language: 'en',
+                    category: articleCategory,
                     status: 'idea',
                     author: 'Editorial Team',
                     sources: {
