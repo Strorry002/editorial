@@ -30,6 +30,7 @@ model Country {
   costOfLiving     CostOfLiving[]
   statistics       Statistic[]
   legalUpdates     LegalUpdate[]
+  cities           City[]
 
   @@index([region])
 }
@@ -486,4 +487,305 @@ model Collection {
 
   @@unique([userId, name])
   @@index([userId])
+}
+
+// ============================================================================
+// CITY — Core entity for nomad data (200+ cities)
+// ============================================================================
+
+model City {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique              // "bangkok", "kuala-lumpur"
+  countryCode   String
+  lat           Float?
+  lng           Float?
+  population    Int?
+  timezone      String?                       // "Asia/Bangkok"
+  isCapital     Boolean  @default(false)
+  nomadScore    Float?                        // composite 0-100
+  description   String?                       // AI-generated city overview
+  metadata      Json     @default("{}")       // flexible extra data
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  country        Country          @relation(fields: [countryCode], references: [code])
+  prices         CityPrice[]
+  housing        CityHousing[]
+  climate        CityClimate[]
+  infrastructure CityInfrastructure[]
+  safety         CitySafety[]
+  environment    CityEnvironment[]
+  healthcare     CityHealthcare[]
+  education      CityEducation[]
+  lifestyle      CityLifestyle[]
+  scores         NomadScore[]
+
+  @@index([countryCode])
+  @@index([nomadScore])
+}
+
+// ============================================================================
+// CITY PRICE — Granular cost of living (Numbeo-style, 50+ items)
+// ============================================================================
+
+model CityPrice {
+  id          String   @id @default(uuid())
+  cityId      String
+  category    String                          // restaurants, markets, transport, utilities, clothing, leisure, childcare
+  item        String                          // "meal_inexpensive", "milk_1l", "metro_ticket", "cappuccino"
+  value       Float
+  currency    String   @default("USD")
+  period      String                          // "2026-Q1"
+  source      String?                         // "numbeo", "ai_enrichment", "teleport"
+  confidence  Int      @default(5)            // 1-10 data quality
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  city        City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, item, period])
+  @@index([cityId])
+  @@index([category])
+}
+
+// ============================================================================
+// CITY HOUSING — Rent, buy, Airbnb, short/mid/long-term
+// ============================================================================
+
+model CityHousing {
+  id               String   @id @default(uuid())
+  cityId           String
+  type             String                     // "rent_1br_center", "rent_1br_outside", "rent_studio", "buy_sqm_center", "airbnb_month", "hostel_night"
+  value            Float
+  currency         String   @default("USD")
+  furnished        Boolean  @default(true)    // furnished or not
+  period           String                     // "2026-Q1"
+  depositMonths    Float?                     // typical deposit in months
+  foreignCanBuy    Boolean?                   // can foreigners buy property
+  source           String?
+  confidence       Int      @default(5)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  city             City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, type, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// CITY CLIMATE — Monthly averages (12 rows per city per year)
+// ============================================================================
+
+model CityClimate {
+  id               String  @id @default(uuid())
+  cityId           String
+  month            Int                        // 1-12
+  avgTempC         Float?                     // average temperature °C
+  minTempC         Float?
+  maxTempC         Float?
+  avgHumidity      Float?                     // percent 0-100
+  avgRainMm        Float?                     // mm per month
+  rainyDays        Int?
+  sunshineHours    Float?                     // hours per month
+  uvIndex          Float?
+  period           String                     // "2026"
+  source           String?
+  createdAt        DateTime @default(now())
+
+  city             City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, month, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// CITY INFRASTRUCTURE — Internet, mobile, coworking, transport
+// ============================================================================
+
+model CityInfrastructure {
+  id                  String   @id @default(uuid())
+  cityId              String
+  internetSpeedMbps   Float?                  // fixed broadband avg
+  mobileSpeedMbps     Float?                  // 4G/5G avg
+  coworkingCount      Int?                    // number of coworking spaces
+  avgCoworkingDay     Float?                  // USD per day
+  avgCoworkingMonth   Float?                  // USD per month
+  hasUber             Boolean  @default(false)
+  hasGrab             Boolean  @default(false)
+  hasBolt             Boolean  @default(false)
+  hasMetro            Boolean  @default(false)
+  simCard10gb         Float?                  // cost of SIM with 10GB data
+  digitalReadiness    Int?                    // 1-10 score: banking, Wise, delivery apps
+  period              String
+  source              String?
+  confidence          Int      @default(5)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  city                City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// CITY SAFETY — Crime, scams, women safety, LGBTQ+
+// ============================================================================
+
+model CitySafety {
+  id                  String   @id @default(uuid())
+  cityId              String
+  crimeIndex          Float?                  // 0-100 (higher = more crime)
+  safetyIndex         Float?                  // 0-100 (higher = safer)
+  walkingDaySafety    Int?                    // 1-10
+  walkingNightSafety  Int?                    // 1-10
+  womenSafety         Int?                    // 1-10
+  lgbtqFriendly       Int?                    // 1-10
+  scamRisk            Int?                    // 1-10 (higher = more scams)
+  corruptionIndex     Float?                  // 0-100
+  period              String
+  source              String?
+  confidence          Int      @default(5)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  city                City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// CITY ENVIRONMENT — Air quality, water, noise, green areas
+// ============================================================================
+
+model CityEnvironment {
+  id               String   @id @default(uuid())
+  cityId           String
+  aqiIndex         Float?                     // Air Quality Index (0-500)
+  pm25             Float?                     // PM2.5 μg/m³
+  waterQuality     Int?                       // 1-10
+  noiseLevel       Int?                       // 1-10
+  greenSpaceScore  Int?                       // 1-10
+  pollutionIndex   Float?                     // 0-100
+  period           String
+  source           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  city             City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// CITY HEALTHCARE — Medical quality, costs, insurance
+// ============================================================================
+
+model CityHealthcare {
+  id                  String   @id @default(uuid())
+  cityId              String
+  qualityIndex        Int?                    // 1-10
+  hospitalBedsPer1k   Float?                  // beds per 1000 people
+  doctorVisitCost     Float?                  // USD, general practitioner
+  dentistVisitCost    Float?                  // USD
+  emergencyVisitCost  Float?                  // USD, ER visit
+  monthlyInsurance    Float?                  // USD, private health insurance
+  pharmacyAccess      Int?                    // 1-10
+  englishDoctors      Int?                    // 1-10, availability of English-speaking doctors
+  period              String
+  source              String?
+  confidence          Int      @default(5)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  city                City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// CITY EDUCATION — Schools, universities, language
+// ============================================================================
+
+model CityEducation {
+  id                    String   @id @default(uuid())
+  cityId                String
+  internationalSchools  Int?                  // count
+  avgTuitionYear        Float?                // USD per year
+  universityRanking     Int?                  // best university world rank
+  englishProficiency    Int?                  // 1-10 (EF EPI based)
+  languageBarrier       Int?                  // 1-10 (1 = easy, 10 = hard)
+  period                String
+  source                String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  city                  City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// CITY LIFESTYLE — Coworking scene, cafes, nightlife, expat community
+// ============================================================================
+
+model CityLifestyle {
+  id                 String   @id @default(uuid())
+  cityId             String
+  cafeScene          Int?                     // 1-10
+  nightlife          Int?                     // 1-10
+  gymMonthly         Float?                   // USD per month
+  fitnessAccess      Int?                     // 1-10
+  expatCommunity     Int?                     // 1-10 (size & activity)
+  meetupScene        Int?                     // 1-10
+  culturalEvents     Int?                     // 1-10
+  foodScene          Int?                     // 1-10
+  familyFriendly     Int?                     // 1-10
+  petFriendly        Int?                     // 1-10
+  petQuarantine      Boolean?                 // does country require pet quarantine
+  avgVetVisit        Float?                   // USD, vet consultation
+  period             String
+  source             String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  city               City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, period])
+  @@index([cityId])
+}
+
+// ============================================================================
+// NOMAD SCORE — Composite score with sub-scores (recalculated on data update)
+// ============================================================================
+
+model NomadScore {
+  id                String   @id @default(uuid())
+  cityId            String
+  overall           Float                     // 0-100 composite
+  costScore         Float?                    // 0-100
+  housingScore      Float?                    // 0-100
+  internetScore     Float?                    // 0-100
+  safetyScore       Float?                    // 0-100
+  climateScore      Float?                    // 0-100
+  healthcareScore   Float?                    // 0-100
+  environmentScore  Float?                    // 0-100
+  lifestyleScore    Float?                    // 0-100
+  educationScore    Float?                    // 0-100
+  infraScore        Float?                    // 0-100 (digital readiness + transport)
+  period            String                    // "2026-Q1"
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  city              City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, period])
+  @@index([cityId])
+  @@index([overall])
 }
