@@ -90,7 +90,16 @@ export async function authRoutes(app: FastifyInstance) {
         if (email.includes('@')) {
             user = await prisma.user.findUnique({ where: { email } });
         } else {
-            user = await prisma.user.findFirst({ where: { displayName: { equals: email, mode: 'insensitive' } } });
+            // Try displayName first (case-insensitive)
+            user = await prisma.user.findFirst({
+                where: { displayName: { equals: email, mode: 'insensitive' } },
+            });
+            // If not found, try email prefix (part before @)
+            if (!user) {
+                user = await prisma.user.findFirst({
+                    where: { email: { startsWith: email.toLowerCase(), mode: 'insensitive' } },
+                });
+            }
         }
         if (!user || !user.isActive) {
             reply.status(401);
