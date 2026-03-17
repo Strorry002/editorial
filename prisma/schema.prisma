@@ -816,3 +816,24 @@ model CityAlert {
   @@index([severity])
   @@index([createdAt])
 }
+
+model SafetyFeed {
+  id          String    @id @default(uuid())
+  source      String                        // gdelt, reliefweb, us_travel, uk_fcdo, usgs, who
+  countryCode String                        // ISO 2-letter code
+  countryName String
+  category    String                        // conflict, crime, health, natural, political, humanitarian
+  title       String
+  summary     String?
+  url         String?
+  severity    String?                       // critical, warning, advisory, info
+  eventDate   DateTime?                     // when the event happened
+  fetchedAt   DateTime  @default(now())     // when we scraped it
+  expiresAt   DateTime                      // auto-cleanup after 7 days
+  raw         String?                       // raw JSON from source for debugging
+
+  @@index([countryCode, fetchedAt])
+  @@index([source])
+  @@index([category])
+  @@index([fetchedAt])
+}

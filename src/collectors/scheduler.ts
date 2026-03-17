@@ -113,9 +113,21 @@ export function startScheduler() {
         }
     });
 
-    // Daily at 08:00 UTC (16:00 KL) — City Alerts: scan 10 cities for safety events
+    // Daily at 07:00 UTC (15:00 KL) — Safety Feed: scrape GDELT, ReliefWeb, US Travel Advisories
+    cron.schedule('0 7 * * *', async () => {
+        console.log('📡 Safety Feed: scraping real-time news sources...');
+        try {
+            const { collectSafetyFeeds } = await import('./safety-feed-collector.js');
+            const result = await collectSafetyFeeds();
+            console.log(`📡 Safety Feed done: ${result.total} items (GDELT: ${result.gdelt}, ReliefWeb: ${result.reliefweb}, US Travel: ${result.travel})`);
+        } catch (err: any) {
+            console.error('📡 Safety Feed error:', err.message);
+        }
+    });
+
+    // Daily at 08:00 UTC (16:00 KL) — City Alerts: scan cities using SafetyFeed data
     cron.schedule('0 8 * * *', async () => {
-        console.log('🚨 City Alerts: scanning cities for safety events...');
+        console.log('🚨 City Alerts: scanning cities with real news context...');
         try {
             const { runAlertsEngine } = await import('../services/stats-data-service.js');
             // Pick 10 random cities each day → full cycle in ~15 days
@@ -135,6 +147,7 @@ export function startScheduler() {
     console.log('📰 Autonomous Newsroom: every 3 hours (autopilot + chief editor + publish 1)');
     console.log('🧳 Feature content: Tue+Fri @14:00 UTC | 📊 Weekly digest: Sun @10:00 UTC');
     console.log('📈 SDS: Wed @02:00 UTC (25 cities batch)');
-    console.log('🚨 City Alerts: daily @08:00 UTC (10 cities/day)');
+    console.log('📡 Safety Feed: daily @07:00 UTC (GDELT + ReliefWeb + US Travel)');
+    console.log('🚨 City Alerts: daily @08:00 UTC (10 cities/day, uses SafetyFeed)');
 }
 

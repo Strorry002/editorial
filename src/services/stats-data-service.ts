@@ -801,23 +801,40 @@ export async function runAlertsEngine(cityIds?: string[]): Promise<{ scanned: nu
         const promises = batch.map(async (city) => {
             try {
                 const today = new Date().toISOString().split('T')[0];
+
+                // Fetch REAL news from SafetyFeed table for this country
+                const recentFeeds = await (prisma as any).safetyFeed.findMany({
+                    where: {
+                        countryCode: city.country.code,
+                        fetchedAt: { gt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+                    },
+                    orderBy: { eventDate: 'desc' },
+                    take: 15,
+                });
+
+                const newsContext = recentFeeds.length > 0
+                    ? `\n\nREAL NEWS HEADLINES FROM OUR INTELLIGENCE FEEDS (last 7 days):\n${recentFeeds.map((f: any) => `- [${f.source.toUpperCase()}] [${f.category}] ${f.title}${f.url ? ` (${f.url})` : ''}`).join('\n')}\n\nUSE THESE HEADLINES to generate alerts. These are REAL, VERIFIED events.`
+                    : '\n\nNo recent intelligence feeds found for this country. Use your knowledge of CURRENT events only.';
+
                 const data = await askAIForData<AlertData[]>(
                     `City: ${city.name}, ${city.country.name} (${city.country.code})
 Date: ${today}
+${newsContext}
 
-List ANY current safety alerts, incidents, or notable events affecting this city RIGHT NOW for travelers/expats.
+Based on the REAL NEWS ABOVE and any other CURRENT events you know about, list safety alerts for this city for travelers/expats.
 
-Categories: conflict (war, protests, coups), crime (tourist robberies, scams, kidnappings), persecution (LGBTQ crackdowns, religious/ethnic targeting), currency (crash, capital controls, ATM issues), health (outbreaks, dengue, mpox), natural (earthquake, typhoon, flooding, wildfire), political (visa rule changes, border closures, curfews).
+Categories: conflict (war, protests, coups, bombings, airstrikes), crime (tourist robberies, scams, kidnappings), persecution (LGBTQ crackdowns, religious/ethnic targeting), currency (crash, capital controls, ATM issues), health (outbreaks, dengue, mpox), natural (earthquake, typhoon, flooding, wildfire), political (visa rule changes, border closures, curfews).
 
-Return a JSON array of alerts. Each alert: { "category": "...", "severity": "critical|warning|advisory|info", "title": "short title", "summary": "2-3 sentences", "source": "news source name", "sourceUrl": "url or empty" }
+Return a JSON array of alerts. Each alert: { "category": "...", "severity": "critical|warning|advisory|info", "title": "short title", "summary": "2-3 sentences with specific details", "source": "news source name", "sourceUrl": "url or empty" }
 
 Rules:
-- Only include REAL, CURRENT events (${today} ±7 days)
+- PRIORITIZE the real news headlines provided above
+- Only include current events (${today} ±7 days)
 - If no current alerts, return empty array []
 - Maximum 5 alerts per city
-- Be specific, not generic
-- severity: critical = immediate danger, warning = exercise caution, advisory = be aware, info = minor`,
-                    'You are a real-time safety intelligence analyst for travelers. Return ONLY a valid JSON array. No markdown, no explanation. If nothing notable is happening, return [].'
+- Be specific with dates and details
+- severity: critical = immediate danger/active conflict, warning = exercise caution, advisory = be aware, info = minor`,
+                    'You are a real-time safety intelligence analyst. You are given VERIFIED news headlines from our feeds. Analyze them and generate travel safety alerts based on REAL data. Return ONLY a valid JSON array. No markdown, no explanation. If nothing notable, return [].'
                 );
 
                 if (!data || !Array.isArray(data) || data.length === 0) {
