@@ -16,12 +16,11 @@ const prisma = new PrismaClient();
 
 // Country codes for our 155 cities (unique countries)
 async function getOurCountryCodes(): Promise<{ code: string; name: string }[]> {
-    const countries = await (prisma as any).city.findMany({
+    const cities = await (prisma as any).city.findMany({
         select: { country: { select: { code: true, name: true } } },
-        distinct: ['countryId'],
     });
     const unique = new Map<string, string>();
-    for (const c of countries) {
+    for (const c of cities) {
         if (c.country?.code) unique.set(c.country.code, c.country.name);
     }
     return Array.from(unique.entries()).map(([code, name]) => ({ code, name }));
