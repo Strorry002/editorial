@@ -37,9 +37,17 @@ async function askAIForData<T>(prompt: string, systemPrompt: string): Promise<T 
             max_tokens: 4000,
         });
 
-        const text = response.choices[0]?.message?.content || '';
-        // Extract JSON from response (handle markdown code blocks)
-        const jsonMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || text.match(/(\{[\s\S]*\})/);
+        const text = (response.choices[0]?.message?.content || '').trim();
+
+        // Handle empty array responses (AI says "no data" or returns [])
+        if (text === '[]' || text.toLowerCase().includes('no alerts') || text.toLowerCase().includes('no current') || text.toLowerCase().includes('nothing notable')) {
+            return [] as unknown as T;
+        }
+
+        // Extract JSON from response (handle markdown code blocks, objects AND arrays)
+        const jsonMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
+            || text.match(/(\[[\s\S]*\])/)     // JSON array
+            || text.match(/(\{[\s\S]*\})/);     // JSON object
         if (!jsonMatch) {
             console.warn('[sds] No JSON found in AI response');
             return null;
