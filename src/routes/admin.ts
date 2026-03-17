@@ -328,4 +328,78 @@ export async function adminRoutes(app: FastifyInstance) {
         const result = await runWeeklyDigest();
         return { data: result };
     });
+
+    // ── Statistical Data Service ─────────────────────────────────
+    app.post('/sds/run', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+        const { engines, maxCities } = (request.body as any) || {};
+        const { runStatisticalDataService } = await import('../services/stats-data-service.js');
+        const result = await runStatisticalDataService({ engines, maxCities: maxCities || 10 });
+        return { data: result };
+    });
+
+    app.post('/sds/engine/:name', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+        const { name } = request.params as { name: string };
+        const { maxCities } = (request.body as any) || {};
+        const sds = await import('../services/stats-data-service.js');
+
+        const engineMap: Record<string, Function> = {
+            cost: sds.runCostOfLivingEngine,
+            housing: sds.runHousingEngine,
+            climate: sds.runClimateEngine,
+            infra: sds.runInfrastructureEngine,
+            safety: sds.runSafetyEngine,
+            env: sds.runEnvironmentEngine,
+            health: sds.runHealthcareEngine,
+            lifestyle: sds.runLifestyleEngine,
+            score: sds.calculateNomadScores,
+        };
+
+        const fn = engineMap[name];
+        if (!fn) return reply.status(400).send({ error: `Unknown engine: ${name}` });
+
+        // Limit cities for engine runs
+        let cityIds: string[] | undefined;
+        if (maxCities && name !== 'score') {
+            const allCities = await prisma.city.findMany({ select: { id: true } });
+            cityIds = allCities.sort(() => Math.random() - 0.5).slice(0, maxCities).map(c => c.id);
+        }
+
+        const result = await fn(cityIds);
+        return { data: result };
+    });
+
+    // ── City data API (internal) ─────────────────────────────────
+    app.get('/cities', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+        const cities = await prisma.city.findMany({
+            orderBy: { nomadScore: 'desc' },
+            include: { country: { select: { name: true, flag: true, currency: true } } },
+        });
+        return { data: cities };
+    });
+
+    app.get('/cities/:slug', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+        const { slug } = request.params as { slug: string };
+        const period = (() => { const now = new Date(); const q = Math.ceil((now.getMonth() + 1) / 3); return `${now.getFullYear()}-Q${q}`; })();
+        const city = await prisma.city.findUnique({
+            where: { slug },
+            include: {
+                country: true,
+                prices: { where: { period } },
+                housing: { where: { period } },
+                climate: true,
+                infrastructure: { where: { period } },
+                safety: { where: { period } },
+                environment: { where: { period } },
+                healthcare: { where: { period } },
+                lifestyle: { where: { period } },
+                scores: { where: { period } },
+            },
+        });
+        if (!city) return reply.status(404).send({ error: 'City not found' });
+        return { data: city };
+    });
 }

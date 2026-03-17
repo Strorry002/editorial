@@ -102,7 +102,20 @@ export function startScheduler() {
         }
     });
 
+    // Wednesday at 02:00 UTC (10:00 KL) — Statistical Data Service: collect city data
+    cron.schedule('0 2 * * 3', async () => {
+        console.log('📈 SDS: running all data engines (25 cities batch)...');
+        try {
+            const { runStatisticalDataService } = await import('../services/stats-data-service.js');
+            await runStatisticalDataService({ maxCities: 25 });
+        } catch (err: any) {
+            console.error('📈 SDS error:', err.message);
+        }
+    });
+
     console.log('📅 Scheduler started: daily collection @06:00 UTC, weekly OECD @Mon 03:00 UTC');
     console.log('📰 Autonomous Newsroom: every 3 hours (autopilot + chief editor + publish 1)');
     console.log('🧳 Feature content: Tue+Fri @14:00 UTC | 📊 Weekly digest: Sun @10:00 UTC');
+    console.log('📈 SDS: Wed @02:00 UTC (25 cities batch)');
 }
+
