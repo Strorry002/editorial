@@ -262,5 +262,86 @@ RULES:
             return { error: 'AI advisor failed', details: (err as Error).message };
         }
     });
+
+    // ── Nomad Cities (powered by SDS) ──
+    app.get('/nomad-cities', async (request) => {
+        const period = (() => { const now = new Date(); const q = Math.ceil((now.getMonth() + 1) / 3); return `${now.getFullYear()}-Q${q}`; })();
+
+        const cities = await (prisma as any).city.findMany({
+            include: {
+                country: { select: { name: true, code: true, flag: true, currency: true } },
+                prices: { where: { period }, select: { item: true, value: true } },
+                housing: { where: { period }, select: { type: true, value: true } },
+                infrastructure: { where: { period }, select: { internetSpeedMbps: true, hasMetro: true, coworkingCount: true, digitalReadiness: true } },
+                safety: { where: { period }, select: { safetyIndex: true, womenSafety: true } },
+                lifestyle: { where: { period }, select: { cafeScene: true, expatCommunity: true, foodScene: true, petFriendly: true } },
+                scores: { where: { period }, select: { overall: true, costScore: true, safetyScore: true, climateScore: true, internetScore: true, lifestyleScore: true } },
+            },
+            orderBy: { nomadScore: 'desc' },
+        });
+
+        // Flatten into simple objects
+        const data = cities.map((c: any) => {
+            const rent = c.housing?.find((h: any) => h.type === 'rent_1br_center')?.value || null;
+            const meal = c.prices?.find((p: any) => p.item === 'meal_inexpensive')?.value || null;
+            const internet = c.infrastructure?.[0]?.internetSpeedMbps || null;
+            const score = c.scores?.[0]?.overall || c.nomadScore || 0;
+            const safety = c.safety?.[0]?.safetyIndex || null;
+            const cafe = c.lifestyle?.[0]?.cafeScene || null;
+            const expat = c.lifestyle?.[0]?.expatCommunity || null;
+
+            return {
+                slug: c.slug,
+                name: c.name,
+                country: c.country?.name || '',
+                countryCode: c.country?.code || '',
+                flag: c.country?.flag || '',
+                lat: c.lat,
+                lng: c.lng,
+                population: c.population,
+                isCapital: c.isCapital,
+                score,
+                rent,
+                meal,
+                internet,
+                safety,
+                cafe,
+                expat,
+                costScore: c.scores?.[0]?.costScore || null,
+                safetyScore: c.scores?.[0]?.safetyScore || null,
+                climateScore: c.scores?.[0]?.climateScore || null,
+                internetScore: c.scores?.[0]?.internetScore || null,
+                lifestyleScore: c.scores?.[0]?.lifestyleScore || null,
+                hasData: (c.prices?.length || 0) > 0 || score > 0,
+            };
+        });
+
+        return { data, total: data.length };
+    });
+
+    // Detailed city data
+    app.get('/nomad-cities/:slug', async (request, reply) => {
+        const { slug } = request.params as { slug: string };
+        const period = (() => { const now = new Date(); const q = Math.ceil((now.getMonth() + 1) / 3); return `${now.getFullYear()}-Q${q}`; })();
+
+        const city = await (prisma as any).city.findUnique({
+            where: { slug },
+            include: {
+                country: true,
+                prices: { where: { period } },
+                housing: { where: { period } },
+                climate: true,
+                infrastructure: { where: { period } },
+                safety: { where: { period } },
+                environment: { where: { period } },
+                healthcare: { where: { period } },
+                lifestyle: { where: { period } },
+                scores: { where: { period } },
+            },
+        });
+
+        if (!city) { reply.status(404); return { error: 'City not found' }; }
+        return { data: city };
+    });
 }
 
