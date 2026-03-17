@@ -1,25 +1,10 @@
-import { PrismaClient } from '@prisma/client';
+import { runStatisticalDataService } from './src/services/stats-data-service.js';
 
-const prisma = new PrismaClient();
-
-async function testClimate() {
-    // Get 3 cities to test
-    const cities = await prisma.city.findMany({ take: 3, select: { id: true, name: true, lat: true, lng: true } });
-    console.log('Testing cities:', cities.map(c => c.name).join(', '));
-
-    // Import and run climate engine
-    const { runClimateEngine } = await import('./src/services/stats-data-service.js');
-    const result = await runClimateEngine(cities.map(c => c.id));
-    console.log('Result:', JSON.stringify(result));
-
-    // Verify data
-    const climateData = await prisma.cityClimate.findMany({ take: 5 });
-    console.log('Climate records:', climateData.length);
-    if (climateData.length > 0) {
-        console.log('Sample:', JSON.stringify(climateData[0], null, 2));
-    }
-
-    await prisma.$disconnect();
+async function main() {
+    console.log('🧪 Testing SDS: full orchestrator on 3 cities...\n');
+    const result = await runStatisticalDataService({ maxCities: 3 });
+    console.log('\n📊 Final result:', JSON.stringify(result, null, 2));
+    process.exit(0);
 }
 
-testClimate().catch(console.error);
+main().catch(err => { console.error('❌ Fatal:', err); process.exit(1); });

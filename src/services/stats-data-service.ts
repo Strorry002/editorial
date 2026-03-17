@@ -97,6 +97,7 @@ const PRICE_ITEMS = [
     { category: 'nomad', item: 'laundry_5kg', label: 'Laundry service (5kg)' },
     { category: 'nomad', item: 'haircut_mens', label: 'Men\'s haircut' },
     { category: 'nomad', item: 'sim_card_10gb', label: 'Tourist SIM card with 10GB data' },
+    { category: 'nomad', item: 'bigmac_single', label: 'Single Big Mac (Big Mac Index)' },
 ];
 
 export async function runCostOfLivingEngine(cityIds?: string[]): Promise<{ processed: number; errors: number }> {
