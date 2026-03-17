@@ -278,4 +278,54 @@ export async function adminRoutes(app: FastifyInstance) {
             },
         };
     });
+
+    // ── Social Distribution Cards ─────────────────────────────────
+    app.get('/social-cards', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+
+        const cards = await prisma.articleDistribution.findMany({
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+            include: {
+                article: {
+                    select: { id: true, title: true, slug: true, coverImage: true, author: true, status: true },
+                },
+            },
+        });
+
+        return { data: cards };
+    });
+
+    app.patch('/social-cards/:id', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+        const { id } = request.params as { id: string };
+        const { status, metadata } = request.body as { status?: string; metadata?: any };
+
+        const data: any = {};
+        if (status) data.status = status;
+        if (metadata) data.metadata = metadata;
+        if (status === 'sent') data.sentAt = new Date();
+
+        const card = await prisma.articleDistribution.update({
+            where: { id },
+            data,
+        });
+        return { data: card };
+    });
+
+    // ── Feature Autopilot: Manual Trigger ────────────────────────
+    app.post('/feature-autopilot/run', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+        const { runFeatureAutopilot } = await import('../services/autopilot.js');
+        const result = await runFeatureAutopilot();
+        return { data: result };
+    });
+
+    // ── Weekly Digest: Manual Trigger ────────────────────────────
+    app.post('/weekly-digest/run', async (request, reply) => {
+        if (!requireAdmin(request, reply)) return { error: 'Forbidden' };
+        const { runWeeklyDigest } = await import('../services/autopilot.js');
+        const result = await runWeeklyDigest();
+        return { data: result };
+    });
 }

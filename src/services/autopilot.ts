@@ -632,6 +632,58 @@ export async function runAutonomousNewsroom(options: {
         publishedArticles.forEach(a => reportLines.push(a));
     }
 
+    // ── Step 3b: Create social media distribution cards ──
+    console.log('[newsroom] Step 3b: Creating social distribution cards...');
+    try {
+        const { adaptContentForAllChannels } = await import('./social-adapter.js');
+        const recentlyPublished = await prisma.article.findMany({
+            where: { status: 'published', publishedAt: { gte: new Date(Date.now() - 6 * 60 * 60 * 1000) } },
+            take: 5,
+        });
+
+        let socialCards = 0;
+        for (const art of recentlyPublished) {
+            // Check if social cards already exist
+            const existingCards = await prisma.articleDistribution.count({
+                where: { articleId: art.id, channel: { notIn: ['telegram', 'facebook'] } },
+            });
+            if (existingCards > 0) continue; // already has social cards
+
+            const adapted = await adaptContentForAllChannels({
+                title: art.title,
+                excerpt: art.excerpt || '',
+                body: art.body || '',
+                slug: art.slug,
+                tags: (art.tags as string[]) || [],
+                coverImage: art.coverImage,
+                author: art.author,
+            }, ['instagram', 'x_twitter', 'linkedin'] as any[]);
+
+            for (const item of adapted) {
+                await prisma.articleDistribution.upsert({
+                    where: { articleId_channel: { articleId: art.id, channel: item.channel } },
+                    create: {
+                        articleId: art.id,
+                        channel: item.channel,
+                        status: 'pending',
+                        format: 'adapted',
+                        metadata: { adaptedText: item.text, hashtags: item.hashtags, mediaNote: item.mediaNote || null },
+                    },
+                    update: {
+                        metadata: { adaptedText: item.text, hashtags: item.hashtags, mediaNote: item.mediaNote || null },
+                    },
+                });
+                socialCards++;
+            }
+        }
+        if (socialCards > 0) {
+            reportLines.push(`📱 Created ${socialCards} social media cards`);
+        }
+    } catch (socialErr: any) {
+        console.error('[newsroom] Social distribution error:', socialErr.message);
+        errors.push(`Social: ${socialErr.message}`);
+    }
+
     // ── Step 4: Summary ──────────────────────────────
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
 
@@ -657,3 +709,291 @@ export async function runAutonomousNewsroom(options: {
 
     return { report };
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Feature Autopilot — human-interest content (lifehacks, guides, stories)
+// ═══════════════════════════════════════════════════════════════
+
+const FEATURE_TOPICS = [
+    {
+        category: 'travel-lifehacks',
+        title_prompt: 'travel lifehack or practical tip for immigrants and expats',
+        examples: [
+            'Moving Abroad with Pets: A Complete Survival Guide',
+            'The Art of Packing for a One-Way Trip',
+            'How to Save 40% on International Moving Costs',
+            'Embassy Appointments: Tricks That Actually Work',
+            'Airport Hacks Every Immigrant Should Know',
+            'How to Ship Your Entire Life Across the Ocean',
+        ],
+    },
+    {
+        category: 'expat-life',
+        title_prompt: 'real expat experience, culture shock, or daily life challenge abroad',
+        examples: [
+            'Culture Shock Is Real: What Nobody Tells You About Your First Year Abroad',
+            'Making Friends in a Country Where You Don\'t Speak the Language',
+            'The Emotional Rollercoaster of Leaving Your Home Country',
+            'Remote Work Timezone Hell: How Expats Actually Manage It',
+            'Things I Wish I Knew Before Moving to Southeast Asia',
+        ],
+    },
+    {
+        category: 'cost-comparison',
+        title_prompt: 'cost of living comparison between two countries or cities for expats',
+        examples: [
+            'Lisbon vs Bangkok: Where Your Dollar Goes Further',
+            '$3000/Month Showdown: Mexico City vs Tbilisi vs Bali',
+            'The Hidden Costs of Living in "Cheap" Countries',
+            'Healthcare Abroad: What $100 Gets You in 10 Countries',
+        ],
+    },
+    {
+        category: 'how-to-guide',
+        title_prompt: 'step-by-step practical guide for an expat or immigrant task',
+        examples: [
+            'How to Open a Bank Account as a Foreigner: Country-by-Country Guide',
+            'Renting Your First Apartment Abroad Without Getting Scammed',
+            'International Health Insurance: The No-BS Breakdown',
+            'How to Get a Local SIM Card and Phone Number in Any Country',
+            'Tax Residency 101: Where Should You Actually Pay Taxes?',
+        ],
+    },
+    {
+        category: 'destination-guide',
+        title_prompt: 'in-depth relocation guide to a specific country or city',
+        examples: [
+            'The Complete Guide to Moving to Portugal in 2026',
+            'Bali for Digital Nomads: Beyond the Instagram Fantasy',
+            'Why Everyone\'s Moving to Georgia (The Country, Not The State)',
+            'Dubai vs Abu Dhabi: An Honest Comparison for Expats',
+        ],
+    },
+];
+
+export async function runFeatureAutopilot(): Promise<{ created: boolean; title: string }> {
+    console.log('[feature] Starting feature autopilot...');
+
+    // Pick a random topic category
+    const topic = FEATURE_TOPICS[Math.floor(Math.random() * FEATURE_TOPICS.length)];
+    const examplesList = topic.examples.map((e, i) => `${i + 1}. "${e}"`).join('\n');
+
+    // Ask AI to generate a fresh, unique article topic
+    const topicResponse = await xai.chat.completions.create({
+        model: AI_MODEL,
+        messages: [
+            {
+                role: 'system',
+                content: `You are an editorial planner for TheImmigrants.news — an online publication for immigrants, expats, and digital nomads.
+
+Generate ONE unique, compelling article idea in the category: "${topic.category}" (${topic.title_prompt}).
+
+Here are examples of the style we're going for (DO NOT repeat these exactly):
+${examplesList}
+
+Requirements:
+- Title must be catchy, specific, and SEO-friendly
+- Must be genuinely useful to someone moving or living abroad
+- Include real-world practical details, not generic advice
+- The article should feel like it was written by someone who actually lived this experience
+- Return JSON: { "title": "...", "outline": "3-5 bullet points of what the article should cover", "tags": ["tag1", "tag2"], "targetAgent": "name of the best agent for this (sarah_mitchell, james_harrison, elena_vasquez, david_chen, anna_kowalski, alex_rivera, marie_leblanc, hans_weber, michael_torres)" }`,
+            },
+            { role: 'user', content: `Generate a fresh ${topic.category} article idea that hasn't been done before. Make it specific and actionable.` },
+        ],
+        temperature: 0.9,
+        response_format: { type: 'json_object' },
+    });
+
+    const idea = JSON.parse(topicResponse.choices[0]?.message?.content || '{}');
+    if (!idea.title) {
+        console.error('[feature] Failed to generate topic');
+        return { created: false, title: '' };
+    }
+
+    console.log(`[feature] Topic: ${idea.title}`);
+
+    // Find best agent
+    let agentId: string | null = null;
+    if (idea.targetAgent) {
+        const agent = await prisma.agent.findFirst({ where: { name: idea.targetAgent } });
+        if (agent) agentId = agent.id;
+    }
+    if (!agentId) {
+        // Fallback: assign by tags
+        agentId = await assignAgent(idea.title, idea.tags || [], null);
+    }
+
+    const agentData = agentId ? await prisma.agent.findUnique({ where: { id: agentId } }) : null;
+
+    // Create the article
+    const slug = slugify(idea.title) + '-' + Date.now().toString(36);
+    const article = await prisma.article.create({
+        data: {
+            title: idea.title,
+            slug,
+            tags: idea.tags || [topic.category],
+            language: 'en',
+            category: topic.category,
+            status: 'idea',
+            author: agentData?.displayName || 'Editorial Team',
+            agentId: agentId || undefined,
+            body: idea.outline || '',
+        },
+    });
+
+    console.log(`[feature] Article created: ${article.id}`);
+
+    // Generate full draft immediately
+    try {
+        const draftPrompt = `Write a comprehensive, engaging article on the following topic:
+
+Title: ${idea.title}
+Outline: ${idea.outline}
+Category: ${topic.category}
+
+This is a FEATURE article, NOT a news piece. Write it like a well-researched magazine article:
+- Use real examples, specific numbers, and practical tips
+- Include personal anecdotes and "insider" knowledge
+- Make it feel like advice from a friend who's been there
+- 1500-2500 words
+- Include practical sections with actionable takeaways
+- NO dry policy language — this should be warm, personal, and useful`;
+
+        const fullPrompt = agentData?.basePrompt
+            ? `${agentData.basePrompt}\n\n${draftPrompt}`
+            : draftPrompt;
+
+        const draftResponse = await xai.chat.completions.create({
+            model: AI_MODEL,
+            messages: [
+                { role: 'system', content: fullPrompt },
+                { role: 'user', content: `Write the full article. Return JSON: { "title": "...", "body": "full article in HTML", "excerpt": "2-3 sentence teaser", "metaDescription": "SEO meta description under 160 chars" }` },
+            ],
+            temperature: 0.7,
+            response_format: { type: 'json_object' },
+        });
+
+        const draft = JSON.parse(draftResponse.choices[0]?.message?.content || '{}');
+        if (draft.body) {
+            await prisma.article.update({
+                where: { id: article.id },
+                data: {
+                    title: draft.title || idea.title,
+                    body: draft.body,
+                    excerpt: draft.excerpt || '',
+                    metaDescription: draft.metaDescription || '',
+                    status: 'draft',
+                    stageUpdatedAt: new Date(),
+                },
+            });
+            console.log(`[feature] Draft generated for: ${draft.title || idea.title}`);
+        }
+    } catch (draftErr: any) {
+        console.error(`[feature] Draft generation failed: ${draftErr.message}`);
+    }
+
+    // Send notification to owner
+    try {
+        const { sendOwnerReport } = await import('./telegram.js');
+        await sendOwnerReport(`🧳 <b>Feature Article Created</b>\n\n📝 ${idea.title}\n📂 ${topic.category}\n✍️ ${agentData?.displayName || 'Editorial Team'}\n🏷 ${(idea.tags || []).join(', ')}`);
+    } catch { }
+
+    return { created: true, title: idea.title };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Weekly Digest — "Week in Immigration" roundup
+// ═══════════════════════════════════════════════════════════════
+
+export async function runWeeklyDigest(): Promise<{ created: boolean; title: string }> {
+    console.log('[digest] Starting weekly digest...');
+
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    // Get all published articles from the past week
+    const weekArticles = await prisma.article.findMany({
+        where: {
+            status: 'published',
+            publishedAt: { gte: weekAgo },
+        },
+        orderBy: { publishedAt: 'desc' },
+        include: {
+            agent: { select: { displayName: true, name: true } },
+        },
+    });
+
+    if (weekArticles.length < 3) {
+        console.log(`[digest] Only ${weekArticles.length} articles this week — generating feature instead`);
+        // Not enough content for digest, generate a feature instead
+        return runFeatureAutopilot();
+    }
+
+    // Build summary of the week's articles
+    const articleSummaries = weekArticles.map((a, i) =>
+        `[${i + 1}] ${a.title} (by ${a.agent?.displayName || a.author || 'Editorial Team'}) — ${a.excerpt?.substring(0, 100) || 'No excerpt'}`
+    ).join('\n');
+
+    // Ask AI to create digest
+    const digestResponse = await xai.chat.completions.create({
+        model: AI_MODEL,
+        messages: [
+            {
+                role: 'system',
+                content: `You are the Chief Editor of TheImmigrants.news. Write a compelling "Week in Immigration" digest article.
+
+You have ${weekArticles.length} articles from this week. Create a digest that:
+1. Opens with the biggest story of the week
+2. Groups related stories by region (Americas, Europe, Asia-Pacific, Global)
+3. Highlights 2-3 key takeaways or trends
+4. Ends with a "what to watch next week" forward-look
+5. References the original articles naturally (use their titles)
+
+This should read like an editorial overview — opinionated, insightful, personal.
+Length: 1000-1800 words in HTML format.
+
+Return JSON: { "title": "Week in Immigration: [catchy subtitle]", "body": "full HTML article", "excerpt": "2-3 sentence teaser", "tags": ["weekly-digest", ...], "metaDescription": "SEO meta under 160 chars" }`,
+            },
+            { role: 'user', content: `This week's articles:\n${articleSummaries}` },
+        ],
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+    });
+
+    const digest = JSON.parse(digestResponse.choices[0]?.message?.content || '{}');
+    if (!digest.body) {
+        console.error('[digest] Failed to generate digest');
+        return { created: false, title: '' };
+    }
+
+    // Find the editor agent (Robert Singh)
+    const editor = await prisma.agent.findFirst({ where: { role: 'editor' } });
+    const slug = slugify(digest.title || 'week-in-immigration') + '-' + Date.now().toString(36);
+
+    const article = await prisma.article.create({
+        data: {
+            title: digest.title || 'Week in Immigration',
+            slug,
+            body: digest.body,
+            excerpt: digest.excerpt || '',
+            metaDescription: digest.metaDescription || '',
+            tags: digest.tags || ['weekly-digest'],
+            language: 'en',
+            category: 'weekly-digest',
+            status: 'draft',
+            author: editor?.displayName || 'Robert Singh',
+            agentId: editor?.id || undefined,
+            stageUpdatedAt: new Date(),
+        },
+    });
+
+    console.log(`[digest] Digest created: ${article.id} — ${digest.title}`);
+
+    // Notify owner
+    try {
+        const { sendOwnerReport } = await import('./telegram.js');
+        await sendOwnerReport(`📊 <b>Weekly Digest Created</b>\n\n📝 ${digest.title}\n📰 Based on ${weekArticles.length} articles this week\n✍️ ${editor?.displayName || 'Chief Editor'}`);
+    } catch { }
+
+    return { created: true, title: digest.title || 'Week in Immigration' };
+}
+

@@ -12,7 +12,7 @@ import { OECDTaxCollector } from './oecd-tax.js';
 import { EULegislationCollector } from './eu-legislation.js';
 import { GovLegislationCollector } from './gov-legislation.js';
 import { CollectorResult } from './base.js';
-import { runAutonomousNewsroom } from '../services/autopilot.js';
+import { runAutonomousNewsroom, runFeatureAutopilot, runWeeklyDigest } from '../services/autopilot.js';
 
 const collectors = [
     new RestCountriesCollector(),
@@ -71,17 +71,38 @@ export function startScheduler() {
         await oecd.run();
     });
 
-    // Every 6 hours — Autonomous Newsroom: full pipeline
-    // Includes: autopilot (group raw→articles) + chief editor (progress stuck) + publish (TG+FB) + owner report
-    cron.schedule('0 */6 * * *', async () => {
+    // Every 3 hours — Autonomous Newsroom: full pipeline
+    // Includes: autopilot (group raw→articles) + chief editor (progress stuck) + publish 1 article + owner report
+    cron.schedule('0 */3 * * *', async () => {
         console.log('📰 Autonomous Newsroom: running full pipeline...');
         try {
-            await runAutonomousNewsroom({ hoursBack: 24, maxPublish: 3 });
+            await runAutonomousNewsroom({ hoursBack: 12, maxPublish: 1 });
         } catch (err: any) {
             console.error('📰 Newsroom error:', err.message);
         }
     });
 
+    // Tuesday + Friday at 14:00 UTC (22:00 KL) — Feature content (lifehacks, guides, human stories)
+    cron.schedule('0 14 * * 2,5', async () => {
+        console.log('🧳 Feature Autopilot: generating human-interest content...');
+        try {
+            await runFeatureAutopilot();
+        } catch (err: any) {
+            console.error('🧳 Feature error:', err.message);
+        }
+    });
+
+    // Sunday at 10:00 UTC (18:00 KL) — Weekly digest
+    cron.schedule('0 10 * * 0', async () => {
+        console.log('📊 Weekly Digest: compiling week in review...');
+        try {
+            await runWeeklyDigest();
+        } catch (err: any) {
+            console.error('📊 Digest error:', err.message);
+        }
+    });
+
     console.log('📅 Scheduler started: daily collection @06:00 UTC, weekly OECD @Mon 03:00 UTC');
-    console.log('📰 Autonomous Newsroom: every 6 hours (includes autopilot + chief editor + publish)');
+    console.log('📰 Autonomous Newsroom: every 3 hours (autopilot + chief editor + publish 1)');
+    console.log('🧳 Feature content: Tue+Fri @14:00 UTC | 📊 Weekly digest: Sun @10:00 UTC');
 }
