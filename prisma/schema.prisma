@@ -520,6 +520,7 @@ model City {
   education      CityEducation[]
   lifestyle      CityLifestyle[]
   scores         NomadScore[]
+  alerts         CityAlert[]
 
   @@index([countryCode])
   @@index([nomadScore])
@@ -788,4 +789,30 @@ model NomadScore {
   @@unique([cityId, period])
   @@index([cityId])
   @@index([overall])
+}
+
+// ============================================================================
+// CITY ALERT — Real-time safety/events monitoring
+// ============================================================================
+
+model CityAlert {
+  id         String    @id @default(uuid())
+  cityId     String
+  category   String    // conflict, crime, persecution, currency, health, natural, political
+  severity   String    // critical, warning, advisory, info
+  title      String    // "Dengue outbreak in Bali"
+  summary    String    // 2-3 sentence AI summary
+  source     String?   // "WHO", "BBC", "Reuters"
+  sourceUrl  String?
+  isActive   Boolean   @default(true)
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  city       City      @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@index([cityId, isActive])
+  @@index([category])
+  @@index([severity])
+  @@index([createdAt])
 }

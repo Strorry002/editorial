@@ -113,9 +113,28 @@ export function startScheduler() {
         }
     });
 
+    // Daily at 08:00 UTC (16:00 KL) — City Alerts: scan 10 cities for safety events
+    cron.schedule('0 8 * * *', async () => {
+        console.log('🚨 City Alerts: scanning cities for safety events...');
+        try {
+            const { runAlertsEngine } = await import('../services/stats-data-service.js');
+            // Pick 10 random cities each day → full cycle in ~15 days
+            const { PrismaClient } = await import('@prisma/client');
+            const prisma = new PrismaClient();
+            const allCities = await prisma.city.findMany({ select: { id: true } });
+            const shuffled = allCities.sort(() => Math.random() - 0.5);
+            const cityIds = shuffled.slice(0, 10).map(c => c.id);
+            await prisma.$disconnect();
+            await runAlertsEngine(cityIds);
+        } catch (err: any) {
+            console.error('🚨 Alerts error:', err.message);
+        }
+    });
+
     console.log('📅 Scheduler started: daily collection @06:00 UTC, weekly OECD @Mon 03:00 UTC');
     console.log('📰 Autonomous Newsroom: every 3 hours (autopilot + chief editor + publish 1)');
     console.log('🧳 Feature content: Tue+Fri @14:00 UTC | 📊 Weekly digest: Sun @10:00 UTC');
     console.log('📈 SDS: Wed @02:00 UTC (25 cities batch)');
+    console.log('🚨 City Alerts: daily @08:00 UTC (10 cities/day)');
 }
 

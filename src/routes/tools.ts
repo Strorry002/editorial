@@ -343,5 +343,121 @@ RULES:
         if (!city) { reply.status(404); return { error: 'City not found' }; }
         return { data: city };
     });
+
+    // ── Cost Comparison (SDS-powered, 155 cities) ──
+    app.get('/cost-comparison', async () => {
+        const period = (() => { const now = new Date(); const q = Math.ceil((now.getMonth() + 1) / 3); return `${now.getFullYear()}-Q${q}`; })();
+
+        const cities = await (prisma as any).city.findMany({
+            include: {
+                country: { select: { name: true, code: true, flag: true, currency: true } },
+                prices: { where: { period }, select: { item: true, value: true, category: true } },
+                housing: { where: { period }, select: { type: true, value: true } },
+            },
+            orderBy: { name: 'asc' },
+        });
+
+        const KEY_ITEMS = [
+            'meal_inexpensive', 'meal_mid_2people', 'cappuccino', 'domestic_beer_restaurant',
+            'water_restaurant', 'milk_1l', 'bread_500g', 'eggs_12', 'rice_1kg', 'chicken_1kg',
+            'banana_1kg', 'tomato_1kg', 'onion_1kg', 'potato_1kg', 'water_1_5l',
+            'one_way_ticket', 'monthly_pass', 'taxi_1km', 'gasoline_1l',
+            'basic_utilities', 'mobile_plan', 'internet_60mbps',
+            'bigmac_single',
+        ];
+
+        const data = cities.filter((c: any) => (c.prices?.length || 0) > 0).map((c: any) => {
+            const priceMap: Record<string, number> = {};
+            for (const p of c.prices || []) priceMap[p.item] = p.value;
+            const rent1br = c.housing?.find((h: any) => h.type === 'rent_1br_center')?.value || null;
+            const rent3br = c.housing?.find((h: any) => h.type === 'rent_3br_center')?.value || null;
+            const airbnb = c.housing?.find((h: any) => h.type === 'airbnb_center')?.value || null;
+
+            // Cost index relative to NYC (meal_inexpensive ~$18 as baseline 100)
+            const mealPrice = priceMap['meal_inexpensive'] || 0;
+            const costIndex = mealPrice > 0 ? Math.round((mealPrice / 18) * 100) : null;
+
+            return {
+                slug: c.slug,
+                name: c.name,
+                country: c.country?.name || '',
+                countryCode: c.country?.code || '',
+                flag: c.country?.flag || '',
+                currency: c.country?.currency || 'USD',
+                lat: c.lat,
+                lng: c.lng,
+                costIndex,
+                rent1br,
+                rent3br,
+                airbnb,
+                meal: priceMap['meal_inexpensive'] || null,
+                mealMid: priceMap['meal_mid_2people'] || null,
+                bigmac: priceMap['bigmac_single'] || null,
+                cappuccino: priceMap['cappuccino'] || null,
+                beer: priceMap['domestic_beer_restaurant'] || null,
+                groceries: {
+                    milk: priceMap['milk_1l'] || null,
+                    bread: priceMap['bread_500g'] || null,
+                    eggs: priceMap['eggs_12'] || null,
+                    rice: priceMap['rice_1kg'] || null,
+                    chicken: priceMap['chicken_1kg'] || null,
+                    banana: priceMap['banana_1kg'] || null,
+                    water: priceMap['water_1_5l'] || null,
+                },
+                transport: {
+                    ticket: priceMap['one_way_ticket'] || null,
+                    monthlyPass: priceMap['monthly_pass'] || null,
+                    taxi1km: priceMap['taxi_1km'] || null,
+                    gasoline: priceMap['gasoline_1l'] || null,
+                },
+                utilities: priceMap['basic_utilities'] || null,
+                internet: priceMap['internet_60mbps'] || null,
+                mobile: priceMap['mobile_plan'] || null,
+            };
+        }).sort((a: any, b: any) => (a.costIndex || 999) - (b.costIndex || 999));
+
+        return { data, total: data.length };
+    });
+
+    // ── City Alerts (real-time safety monitoring) ──
+    app.get('/city-alerts', async (request) => {
+        const { category, severity, limit } = request.query as { category?: string; severity?: string; limit?: string };
+        const where: Record<string, unknown> = { isActive: true };
+        if (category) where.category = category;
+        if (severity) where.severity = severity;
+
+        const alerts = await (prisma as any).cityAlert.findMany({
+            where,
+            include: {
+                city: {
+                    select: { name: true, slug: true, lat: true, lng: true, country: { select: { name: true, flag: true, code: true } } }
+                },
+            },
+            orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],
+            take: parseInt(limit || '100'),
+        });
+
+        // Sort by severity priority
+        const severityOrder: Record<string, number> = { critical: 0, warning: 1, advisory: 2, info: 3 };
+        alerts.sort((a: any, b: any) => (severityOrder[a.severity] || 9) - (severityOrder[b.severity] || 9));
+
+        return { data: alerts, total: alerts.length };
+    });
+
+    app.get('/city-alerts/:slug', async (request, reply) => {
+        const { slug } = request.params as { slug: string };
+        const city = await (prisma as any).city.findUnique({ where: { slug }, select: { id: true, name: true } });
+        if (!city) { reply.status(404); return { error: 'City not found' }; }
+
+        const alerts = await (prisma as any).cityAlert.findMany({
+            where: { cityId: city.id, isActive: true },
+            orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],
+        });
+
+        const severityOrder: Record<string, number> = { critical: 0, warning: 1, advisory: 2, info: 3 };
+        alerts.sort((a: any, b: any) => (severityOrder[a.severity] || 9) - (severityOrder[b.severity] || 9));
+
+        return { data: alerts, total: alerts.length, city: city.name };
+    });
 }
 

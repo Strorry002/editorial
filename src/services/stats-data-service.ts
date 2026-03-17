@@ -751,3 +751,123 @@ export async function runStatisticalDataService(options?: {
 
     return results;
 }
+
+// ============================================================================
+// ENGINE 9: CITY ALERTS — Daily safety/events monitoring
+// ============================================================================
+
+type AlertData = {
+    category: string;
+    severity: string;
+    title: string;
+    summary: string;
+    source: string;
+    sourceUrl: string;
+};
+
+const ALERT_CATEGORIES = ['conflict', 'crime', 'persecution', 'currency', 'health', 'natural', 'political'];
+const ALERT_SEVERITIES = ['critical', 'warning', 'advisory', 'info'];
+
+export async function runAlertsEngine(cityIds?: string[]): Promise<{ scanned: number; alertsCreated: number; alertsExpired: number }> {
+    const cities = await prisma.city.findMany({
+        where: cityIds ? { id: { in: cityIds } } : undefined,
+        include: { country: { select: { name: true, code: true } } },
+    });
+
+    let alertsCreated = 0;
+    let alertsExpired = 0;
+
+    // Auto-expire old alerts (>30 days)
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const expired = await (prisma as any).cityAlert.updateMany({
+        where: { isActive: true, createdAt: { lt: thirtyDaysAgo } },
+        data: { isActive: false },
+    });
+    alertsExpired = expired.count;
+    if (alertsExpired > 0) console.log(`[sds:alerts] Expired ${alertsExpired} old alerts`);
+
+    // Process cities in batches of 5
+    const batchSize = 5;
+    for (let i = 0; i < cities.length; i += batchSize) {
+        const batch = cities.slice(i, i + batchSize);
+        const promises = batch.map(async (city) => {
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const data = await askAIForData<AlertData[]>(
+                    `City: ${city.name}, ${city.country.name} (${city.country.code})
+Date: ${today}
+
+List ANY current safety alerts, incidents, or notable events affecting this city RIGHT NOW for travelers/expats.
+
+Categories: conflict (war, protests, coups), crime (tourist robberies, scams, kidnappings), persecution (LGBTQ crackdowns, religious/ethnic targeting), currency (crash, capital controls, ATM issues), health (outbreaks, dengue, mpox), natural (earthquake, typhoon, flooding, wildfire), political (visa rule changes, border closures, curfews).
+
+Return a JSON array of alerts. Each alert: { "category": "...", "severity": "critical|warning|advisory|info", "title": "short title", "summary": "2-3 sentences", "source": "news source name", "sourceUrl": "url or empty" }
+
+Rules:
+- Only include REAL, CURRENT events (${today} ±7 days)
+- If no current alerts, return empty array []
+- Maximum 5 alerts per city
+- Be specific, not generic
+- severity: critical = immediate danger, warning = exercise caution, advisory = be aware, info = minor`,
+                    'You are a real-time safety intelligence analyst for travelers. Return ONLY a valid JSON array. No markdown, no explanation. If nothing notable is happening, return [].'
+                );
+
+                if (!data || !Array.isArray(data) || data.length === 0) {
+                    console.log(`  ✓ ${city.name} — no alerts`);
+                    return 0;
+                }
+
+                let created = 0;
+                for (const alert of data.slice(0, 5)) {
+                    // Validate category and severity
+                    if (!ALERT_CATEGORIES.includes(alert.category)) continue;
+                    if (!ALERT_SEVERITIES.includes(alert.severity)) continue;
+                    if (!alert.title || !alert.summary) continue;
+
+                    // Dedup: check if similar alert already exists (same city + similar title)
+                    const existing = await (prisma as any).cityAlert.findFirst({
+                        where: {
+                            cityId: city.id,
+                            isActive: true,
+                            title: { contains: alert.title.split(' ').slice(0, 3).join(' '), mode: 'insensitive' },
+                        },
+                    });
+                    if (existing) continue;
+
+                    await (prisma as any).cityAlert.create({
+                        data: {
+                            cityId: city.id,
+                            category: alert.category,
+                            severity: alert.severity,
+                            title: alert.title.slice(0, 200),
+                            summary: alert.summary.slice(0, 500),
+                            source: alert.source?.slice(0, 100) || null,
+                            sourceUrl: alert.sourceUrl?.slice(0, 500) || null,
+                            isActive: true,
+                            expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days default
+                        },
+                    });
+                    created++;
+                }
+
+                if (created > 0) {
+                    console.log(`  ⚠️ ${city.name} — ${created} new alert(s)`);
+                }
+                return created;
+            } catch (err: any) {
+                console.error(`  ❌ ${city.name} — ${err.message}`);
+                return 0;
+            }
+        });
+
+        const results = await Promise.all(promises);
+        alertsCreated += results.reduce((a, b) => a + b, 0);
+
+        if (i + batchSize < cities.length) {
+            await new Promise(r => setTimeout(r, 2000)); // Rate limit
+        }
+    }
+
+    console.log(`[sds:alerts] Scanned ${cities.length} cities, created ${alertsCreated} alerts, expired ${alertsExpired}`);
+    return { scanned: cities.length, alertsCreated, alertsExpired };
+}
