@@ -6,6 +6,58 @@ import { resolveCategory } from './category-resolver.js';
 const prisma = new PrismaClient();
 const xai = getXAIClient();
 
+// ── Immigration Relevance Helpers ────────────────────────────────
+const IMMIGRATION_KEYWORDS = [
+    'immigra', 'visa', 'work permit', 'residence permit', 'green card',
+    'citizen', 'naturaliz', 'passport', 'asylum', 'refugee', 'deport',
+    'border', 'migrant', 'migrat', 'expat', 'digital nomad', 'nomad',
+    'foreign worker', 'talent', 'labor mobil', 'relocation', 'resettle',
+    'trafficking', 'smuggl', 'undocumented', 'overstay',
+    'h-1b', 'h1b', 'eb-5', 'o-1', 'schengen', 'golden visa',
+    'student visa', 'education visa', 'work abroad', 'live abroad',
+];
+
+/**
+ * Fast keyword-based check: does title+excerpt mention immigration topics?
+ * Used as final gate before publishing.
+ */
+function isImmigrationRelated(title: string, excerpt: string): boolean {
+    const text = `${title} ${excerpt}`.toLowerCase();
+    return IMMIGRATION_KEYWORDS.some(kw => text.includes(kw));
+}
+
+/**
+ * AI-powered relevance check: asks Grok if the article is about immigration.
+ * Used by chief editor before auto-approving.
+ */
+async function checkImmigrationRelevance(title: string, body: string): Promise<boolean> {
+    try {
+        const snippet = body.substring(0, 500); // first 500 chars is enough
+        const response = await xai.chat.completions.create({
+            model: AI_MODEL,
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a topic classifier. Determine if the article is about immigration, visas, work permits, refugees, expats, digital nomads, global mobility, citizenship, or related topics.
+Reply with JSON: { "relevant": true/false, "reason": "brief explanation" }`,
+                },
+                { role: 'user', content: `Title: ${title}\n\n${snippet}` },
+            ],
+            temperature: 0.1,
+            max_tokens: 100,
+            response_format: { type: 'json_object' },
+        });
+        const result = JSON.parse(response.choices[0]?.message?.content || '{"relevant": true}');
+        if (!result.relevant) {
+            console.log(`[chief-editor] Off-topic detected: "${title.substring(0, 50)}" — ${result.reason}`);
+        }
+        return result.relevant !== false;
+    } catch (err: any) {
+        console.warn(`[chief-editor] Relevance check failed, defaulting to relevant: ${err.message}`);
+        return true; // fail-open: if AI check fails, allow through
+    }
+}
+
 /**
  * Group raw updates by topic/region using AI, then create articles.
  * Called by cron at 11:00 or manually via API.
@@ -43,23 +95,45 @@ export async function runAutopilot(options: {
         messages: [
             {
                 role: 'system',
-                content: `You are an editorial assistant. Group these news items into article topics.
+                content: `You are an editorial assistant for an IMMIGRATION news platform. Group these news items into article topics.
+
+CRITICAL RELEVANCE RULE:
+ONLY include items that are DIRECTLY related to at least one of these topics:
+- Immigration policy, visa rules, work permits, residence permits
+- Refugees, asylum seekers, deportation, border control
+- Citizenship, naturalization, green cards, passports
+- Expat life, digital nomads, global mobility, relocation
+- Labor migration, foreign workers, talent acquisition
+- International students, education visas
+- Human trafficking, migrant rights
+
+REJECT items about: generic politics, environment/ecology, technology, sports, entertainment, domestic economic policy unrelated to migration, military/defense (unless about refugee impact).
+
+For each group, set "relevant": true/false. Mark false if the topic is NOT about immigration/migration/visas/expats.
+
 Rules:
 - Each group should have 1-5 related items
 - Items can be related by country, category, or theme
 - Single items that are important enough can be their own article
-- Return JSON: { "groups": [ { "title": "Article title in English", "tags": ["tag1"], "indices": [0, 2, 5] } ] }
+- Return JSON: { "groups": [ { "title": "Article title in English", "tags": ["tag1"], "indices": [0, 2, 5], "relevant": true } ] }
 - Title should be catchy and informative, in English
-- Maximum 5 groups`,
+- Maximum 5 groups
+- If NO items are immigration-relevant, return { "groups": [] }`,
             },
             { role: 'user', content: `Group these updates:\n${summaryList}` },
         ],
-        temperature: 0.5,
+        temperature: 0.3,
         response_format: { type: 'json_object' },
     });
 
     const groupsData = JSON.parse(groupingResponse.choices[0]?.message?.content || '{"groups":[]}');
-    const groups = groupsData.groups || [];
+    // Filter out non-immigration-relevant groups
+    const allGroups = groupsData.groups || [];
+    const groups = allGroups.filter((g: any) => g.relevant !== false);
+    const rejected = allGroups.length - groups.length;
+    if (rejected > 0) {
+        console.log(`[autopilot] Filtered out ${rejected} non-immigration groups`);
+    }
 
     let created = 0;
     let drafted = 0;
@@ -366,6 +440,16 @@ export async function runChiefEditor(): Promise<{ progressed: number; details: s
                         data: { reviewNote: review, status: 'review', reviewer: 'AI Chief Editor', stageUpdatedAt: new Date() },
                     });
                 } else if (stage.from === 'review') {
+                    // Quick AI relevance check before auto-approving
+                    const isRelevant = await checkImmigrationRelevance(article.title, article.body || '');
+                    if (!isRelevant) {
+                        await prisma.article.update({
+                            where: { id: article.id },
+                            data: { status: 'archived', stageUpdatedAt: new Date(), reviewNote: 'Auto-archived: not immigration-relevant' },
+                        });
+                        details.push(`ARCHIVED (off-topic): ${article.title}`);
+                        continue;
+                    }
                     await prisma.article.update({
                         where: { id: article.id },
                         data: { status: 'approved', stageUpdatedAt: new Date() },
@@ -500,6 +584,16 @@ export async function runAutonomousNewsroom(options: {
 
     for (const article of approved) {
         try {
+            // Final relevance gate — keyword check before publishing
+            if (!isImmigrationRelated(article.title, article.excerpt || '')) {
+                console.log(`[newsroom] SKIPPED (off-topic): ${article.title.substring(0, 60)}`);
+                await prisma.article.update({
+                    where: { id: article.id },
+                    data: { status: 'archived', stageUpdatedAt: new Date(), reviewNote: 'Auto-archived at publish: not immigration-relevant' },
+                });
+                reportLines.push(`🚫 Archived (off-topic): "${article.title.substring(0, 50)}"`);
+                continue;
+            }
             // Generate cover if missing
             if (!article.coverImage) {
                 console.log(`[newsroom] Generating cover for: ${article.title}`);
