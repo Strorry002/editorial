@@ -264,7 +264,8 @@ model Article {
 
   tags            String[]
   region          String?
-  category        String?               // frontend category slug: north-america, europe, schengen, etc.
+  category        String?               // frontend category slug: north-america, europe, schengen, etc. (NOW = region axis)
+  topicType       String?               // topic type slug: golden-visas, work-permits, education, etc. (NEW = topic axis)
   language        String    @default("en")
 
   status          String    @default("idea") // idea, outline, draft, review, approved, published, archived
@@ -292,6 +293,7 @@ model Article {
   @@index([publishedAt])
   @@index([language])
   @@index([category])
+  @@index([topicType])
 }
 
 model ArticleSource {
